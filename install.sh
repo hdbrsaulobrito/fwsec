@@ -7,6 +7,7 @@
 set -euo pipefail
 
 FWSEC_VERSION="1.0.0"
+REPO="hdbrsaulobrito/fwsec"
 INSTALL_DIR="/opt/fwsec"
 CONFIG_DIR="/etc/fwsec"
 BIN="/usr/local/bin/fwsec"
@@ -53,17 +54,17 @@ check_already_installed() {
     echo ""
 
     if [[ "$installed_version" == "$FWSEC_VERSION" ]]; then
-        echo -e "${GREEN}[OK]${NC} The installed version is current. Nothing to do."
+        echo -e "${GREEN}[OK]${NC} The installed version matches this package. Nothing to do."
         echo ""
-        echo -e "  Force reinstallation : ${BOLD}bash install.sh --force${NC}"
-        echo -e "  Upgrade             : ${BOLD}bash install.sh --upgrade${NC}"
+        echo -e "  Check the repository for a newer release : ${BOLD}bash install.sh --upgrade${NC}"
+        echo -e "  Force reinstallation                      : ${BOLD}bash install.sh --force${NC}"
         echo ""
         exit 0
     else
         echo -e "${YELLOW}[!]${NC} A different version is installed."
         echo ""
-        echo -e "  Upgrade   : ${BOLD}bash install.sh --upgrade${NC}"
-        echo -e "  Reinstall : ${BOLD}bash install.sh --force${NC}"
+        echo -e "  Upgrade from the repository : ${BOLD}bash install.sh --upgrade${NC}"
+        echo -e "  Reinstall                   : ${BOLD}bash install.sh --force${NC}"
         echo ""
         exit 0
     fi
@@ -409,6 +410,7 @@ install_config_files() {
             ok "  ${f}: preserved (already exists)."
         elif [[ -f "$src" ]]; then
             cp "$src" "$dst"
+            if [[ "$f" == "fwsec.conf" ]]; then CONF_IS_NEW=1; fi
             ok "  ${f}: installed."
         else
             warn "  ${f}: source file was not found at ${src}."
@@ -490,12 +492,223 @@ post_install_check() {
 }
 
 # =============================================================================
+# Upgrade from the GitHub repository
+# =============================================================================
+version_gt() {
+    # True when $1 is strictly newer than $2 (semantic sort)
+    [[ "$1" != "$2" ]] && [[ "$(printf '%s\n' "$1" "$2" | sort -V | tail -1)" == "$1" ]]
+}
+
+fetch_remote_version() {
+    local v=""
+    # Prefer the latest published release tag
+    v=$(curl -fsSL --max-time 15 "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null \
+        | grep -oE '"tag_name":[[:space:]]*"[^"]+"' | head -1 \
+        | sed -E 's/.*"v?([0-9][^"]*)"$/\1/') || true
+    # Fallback: version declared in pyproject.toml on main
+    if [[ -z "$v" ]]; then
+        v=$(curl -fsSL --max-time 15 "https://raw.githubusercontent.com/${REPO}/main/pyproject.toml" 2>/dev/null \
+            | grep -E '^version[[:space:]]*=' | head -1 \
+            | sed -E 's/.*"([^"]+)".*/\1/') || true
+    fi
+    echo "$v"
+}
+
+download_source() {
+    # Downloads and extracts the source for version $1; echoes the source dir.
+    local ver="$1" tmp dir
+    tmp=$(mktemp -d /tmp/fwsec-upgrade.XXXXXX)
+    if ! curl -fsSL --max-time 60 -o "${tmp}/src.tar.gz" \
+            "https://github.com/${REPO}/archive/refs/tags/v${ver}.tar.gz" 2>/dev/null; then
+        # No tag for this version — fall back to the main branch tarball
+        curl -fsSL --max-time 60 -o "${tmp}/src.tar.gz" \
+            "https://github.com/${REPO}/archive/refs/heads/main.tar.gz" \
+            || { rm -rf "$tmp"; return 1; }
+    fi
+    tar -xzf "${tmp}/src.tar.gz" -C "$tmp" || { rm -rf "$tmp"; return 1; }
+    dir=$(find "$tmp" -mindepth 1 -maxdepth 1 -type d | head -1)
+    [[ -n "$dir" && -f "$dir/pyproject.toml" ]] || { rm -rf "$tmp"; return 1; }
+    echo "$dir"
+}
+
+run_upgrade() {
+    command -v curl &>/dev/null || die "curl is required for --upgrade."
+
+    local installed=""
+    if command -v fwsec &>/dev/null; then
+        installed=$(fwsec -v 2>/dev/null | grep '^fwsec' | awk '{print $2}' || true)
+    fi
+    [[ -n "$installed" ]] || die "fwsec is not installed. Run: sudo bash install.sh"
+
+    info "Installed version : ${installed}"
+    info "Checking the repository (${REPO}) for the latest version..."
+    local remote
+    remote=$(fetch_remote_version)
+    [[ -n "$remote" ]] || die "Could not query the latest version. Check network connectivity."
+    info "Repository version: ${remote}"
+
+    if ! version_gt "$remote" "$installed"; then
+        ok "fwsec ${installed} is already up to date. Nothing to do."
+        exit 0
+    fi
+
+    echo ""
+    info "New version available. Upgrading fwsec ${installed} → ${remote}..."
+    local src_dir
+    src_dir=$(download_source "$remote") || die "Failed to download fwsec ${remote} from the repository."
+    SCRIPT_DIR="$src_dir"
+    FWSEC_VERSION="$remote"
+
+    install_python
+    install_uv
+    install_fwsec_package
+    install_binary
+    rm -rf "$(dirname "$src_dir")"
+
+    echo ""
+    info "Reloading rules with the new version..."
+    fwsec -r 2>/dev/null || true
+    ok "fwsec upgraded to ${remote}. Configuration files were preserved."
+    fwsec -v
+    echo ""
+    exit 0
+}
+
+# =============================================================================
+# Interactive port configuration
+# =============================================================================
+DEFAULT_TCP_OUT="80,443,53,853"   # HTTP, HTTPS, DNS, DNS-over-TLS
+DEFAULT_UDP_OUT="53,123,443"      # DNS, NTP, QUIC/HTTP3
+
+_list_listeners() {
+    # $1 = t|u — prints "port service" pairs, skipping loopback-only listeners
+    ss -H "-${1}lnp" 2>/dev/null | awk '
+    {
+        n = split($4, a, ":"); port = a[n]
+        addr = substr($4, 1, length($4) - length(port) - 1)
+        if (addr ~ /^127\./ || addr == "[::1]") next
+        if (port !~ /^[0-9]+$/) next
+        svc = "-"
+        if (match($0, /\(\("[^"]+"/)) svc = substr($0, RSTART + 3, RLENGTH - 4)
+        if (!seen[port]++) print port, svc
+    }' | sort -n
+}
+
+set_conf_value() {
+    local key="$1" value="$2"
+    sed -i -E "s|^(${key}[[:space:]]*=).*|\\1 ${value}|" "${CONFIG_DIR}/fwsec.conf"
+}
+
+_prompt_ports() {
+    # $1 = label, $2 = suggested default — echoes the chosen list (may be empty)
+    local input=""
+    read -r -p "$(echo -e "  ${BOLD}$1${NC} [${2:-none}]: ")" input || input=""
+    input="${input//[[:space:]]/}"
+    [[ -z "$input" ]] && input="$2"
+    if [[ "$input" == "none" ]]; then
+        echo ""
+        return 0
+    fi
+    if [[ -n "$input" && ! "$input" =~ ^[0-9]+(:[0-9]+)?(,[0-9]+(:[0-9]+)?)*$ ]]; then
+        warn "Invalid port list '${input}'. Keeping suggested value: ${2:-none}" >&2
+        input="$2"
+        [[ "$input" == "none" ]] && input=""
+    fi
+    echo "$input"
+}
+
+configure_ports() {
+    local conf="${CONFIG_DIR}/fwsec.conf"
+    [[ -f "$conf" ]] || return 0
+
+    local ssh_port
+    ssh_port=$(grep -E "^Port\s+" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -1)
+    ssh_port="${ssh_port:-22}"
+
+    echo ""
+    echo -e "${BOLD}${CYAN}--------------------------------------------${NC}"
+    echo -e "${BOLD}${CYAN}  Port configuration${NC}"
+    echo -e "${BOLD}${CYAN}--------------------------------------------${NC}"
+
+    local tcp_listeners udp_listeners
+    tcp_listeners=$(_list_listeners t)
+    udp_listeners=$(_list_listeners u)
+
+    echo ""
+    info "Services currently listening on this system:"
+    printf "    %-8s %-6s %s\n" "PORT" "PROTO" "SERVICE"
+    local port svc
+    while read -r port svc; do
+        [[ -n "$port" ]] || continue
+        if [[ "$port" == "$ssh_port" ]]; then
+            printf "    %-8s %-6s %s  ${GREEN}(SSH — always kept open)${NC}\n" "$port" "tcp" "$svc"
+        else
+            printf "    %-8s %-6s %s\n" "$port" "tcp" "$svc"
+        fi
+    done <<< "$tcp_listeners"
+    while read -r port svc; do
+        [[ -n "$port" ]] || continue
+        printf "    %-8s %-6s %s\n" "$port" "udp" "$svc"
+    done <<< "$udp_listeners"
+
+    # Suggested inbound defaults = detected listeners (SSH is handled separately)
+    local tcp_in_default udp_in_default
+    tcp_in_default=$(awk -v ssh="$ssh_port" '$1 != ssh {printf "%s%s", sep, $1; sep=","}' <<< "$tcp_listeners")
+    udp_in_default=$(awk '{printf "%s%s", sep, $1; sep=","}' <<< "$udp_listeners")
+
+    local tcp_in udp_in tcp_out udp_out
+    if [[ -t 0 ]]; then
+        echo ""
+        info "Choose which ports stay open. Press Enter to accept the suggested value,"
+        info "type a comma-separated list (ranges like 8000:8080 allowed), or 'none'."
+        info "The SSH port (${ssh_port}) is detected automatically and always stays open."
+        echo ""
+        tcp_in=$(_prompt_ports  "Inbound  TCP (TCP_IN)  — detected services" "$tcp_in_default")
+        udp_in=$(_prompt_ports  "Inbound  UDP (UDP_IN)  — detected services" "$udp_in_default")
+        tcp_out=$(_prompt_ports "Outbound TCP (TCP_OUT) — 80/443 web, 53 DNS, 853 DNS-over-TLS" "$DEFAULT_TCP_OUT")
+        udp_out=$(_prompt_ports "Outbound UDP (UDP_OUT) — 53 DNS, 123 NTP, 443 QUIC" "$DEFAULT_UDP_OUT")
+    else
+        echo ""
+        warn "Non-interactive shell: applying detected inbound ports and safe outbound defaults."
+        tcp_in="$tcp_in_default"
+        udp_in="$udp_in_default"
+        tcp_out="$DEFAULT_TCP_OUT"
+        udp_out="$DEFAULT_UDP_OUT"
+    fi
+
+    set_conf_value "TCP_IN"  "$tcp_in"
+    set_conf_value "UDP_IN"  "$udp_in"
+    set_conf_value "TCP_OUT" "$tcp_out"
+    set_conf_value "UDP_OUT" "$udp_out"
+
+    echo ""
+    ok "Ports saved to ${conf}:"
+    ok "  TCP_IN = ${tcp_in:-none}  |  UDP_IN = ${udp_in:-none}"
+    ok "  TCP_OUT = ${tcp_out:-none}  |  UDP_OUT = ${udp_out:-none}"
+}
+
+configure_ports_if_needed() {
+    if [[ "${CONF_IS_NEW:-0}" -eq 1 ]]; then
+        configure_ports
+    elif [[ -t 0 ]]; then
+        local answer=""
+        read -r -p "$(echo -e "${CYAN}[*]${NC} fwsec.conf already exists. Reconfigure allowed ports? [y/N]: ")" answer || answer=""
+        if [[ "${answer,,}" == "y" || "${answer,,}" == "yes" ]]; then
+            configure_ports
+        else
+            ok "Keeping the existing port configuration."
+        fi
+    fi
+}
+
+# =============================================================================
 # Main
 # =============================================================================
 main() {
     # Parse flags
     FORCE=0
     UPGRADE=0
+    CONF_IS_NEW=0
     for arg in "$@"; do
         case "$arg" in
             --force)   FORCE=1 ;;
@@ -516,24 +729,15 @@ main() {
     elif [[ "$FORCE" -eq 1 ]]; then
         warn "--force mode: reinstalling over the existing installation."
     elif [[ "$UPGRADE" -eq 1 ]]; then
-        info "--upgrade mode: upgrading fwsec..."
+        info "--upgrade mode: checking the repository for a newer version..."
     fi
 
     detect_os
 
-    # Upgrade only the package and executable; preserve everything else
+    # Upgrade: consult the repository and install a newer release when available.
+    # Only the package and executable change; configuration is preserved.
     if [[ "$UPGRADE" -eq 1 ]]; then
-        install_python
-        install_uv
-        install_fwsec_package
-        install_binary
-        echo ""
-        info "Reloading rules with the new version..."
-        fwsec -r 2>/dev/null || true
-        ok "fwsec upgraded to ${FWSEC_VERSION}."
-        fwsec -v
-        echo ""
-        exit 0
+        run_upgrade
     fi
 
     install_base_deps
@@ -546,6 +750,7 @@ main() {
     enable_nftables
     install_fwsec_package
     install_config_files
+    configure_ports_if_needed
     install_binary
     install_service
 

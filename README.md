@@ -17,8 +17,18 @@ sudo bash install.sh
 | Flag | Behavior |
 |---|---|
 | *(no flags)* | Installs fwsec. If it is already installed, displays its status and exits. |
-| `--upgrade` | Upgrades the package and executable while preserving configuration files. |
+| `--upgrade` | Queries the GitHub repository for the latest version. When a newer release is available, downloads it and upgrades the package and executable while preserving configuration files; otherwise reports that fwsec is up to date. |
 | `--force` | Performs a complete reinstallation. |
+
+### Interactive port selection
+
+During installation, the installer scans the system with `ss` and lists every service currently listening (port, protocol, and service name). It then asks which ports to keep open for each direction:
+
+- **Inbound TCP / UDP** — defaults to the detected listening services. The SSH port is detected automatically and always stays open.
+- **Outbound TCP** — suggests `80,443,53,853` (HTTP, HTTPS, DNS, DNS-over-TLS).
+- **Outbound UDP** — suggests `53,123,443` (DNS, NTP, QUIC/HTTP3).
+
+At each prompt, press Enter to accept the suggestion, type a comma-separated list (ranges like `8000:8080` are allowed), or type `none`. The choices are written to `/etc/fwsec/fwsec.conf`. In non-interactive shells the detected inbound ports and the safe outbound defaults are applied automatically. If `fwsec.conf` already exists, the installer asks before reconfiguring ports.
 
 ## Quick reference
 

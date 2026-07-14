@@ -150,4 +150,5 @@ table inet fwsec {
 
 
 def _port_list(ports: list[str]) -> str:
-    return ", ".join(ports)
+    # Config files use 8000:8080 for ranges; nft expects 8000-8080
+    return ", ".join(p.replace(":", "-") for p in ports)
