@@ -1,5 +1,5 @@
 # fwsec.deny - IP Blacklist (permanent bans)
 # Format: IP/CIDR  # optional comment
 # Examples:
-#   198.51.100.0/24  # Bloco malicioso
-#   203.0.113.99     # Atacante SSH
+#   198.51.100.0/24  # Malicious network
+#   203.0.113.99     # SSH attacker

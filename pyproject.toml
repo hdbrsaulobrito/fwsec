@@ -7,14 +7,15 @@ name = "fwsec"
 version = "1.0.0"
 description = "nftables + CrowdSec firewall manager — CSF-style CLI"
 readme = "README.md"
+license = "GPL-2.0-only"
 requires-python = ">=3.10"
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/HostDimeBR/fwsec"
-Repository = "https://github.com/HostDimeBR/fwsec.git"
-Issues = "https://github.com/HostDimeBR/fwsec/issues"
-Security = "https://github.com/HostDimeBR/fwsec/security/policy"
+Homepage = "https://github.com/hdbrsaulobrito/fwsec"
+Repository = "https://github.com/hdbrsaulobrito/fwsec.git"
+Issues = "https://github.com/hdbrsaulobrito/fwsec/issues"
+Security = "https://github.com/hdbrsaulobrito/fwsec/security/policy"
 
 [project.scripts]
 fwsec = "fwsec.cli:main"

@@ -1,19 +1,19 @@
-# Política de segurança
+# Security policy
 
-## Versões suportadas
+## Supported versions
 
-A versão mais recente da branch `main` recebe correções de segurança.
+The latest version on the `main` branch receives security fixes.
 
-## Relatando uma vulnerabilidade
+## Reporting a vulnerability
 
-Não abra uma issue pública para vulnerabilidades ou informações sensíveis.
+Do not open a public issue for vulnerabilities or sensitive information.
 
-Use **Security → Report a vulnerability** neste repositório. O relato privado deve incluir:
+Use **Security → Report a vulnerability** in this repository. The private report should include:
 
-- versão ou commit afetado;
-- ambiente e distribuição Linux;
-- passos para reprodução;
-- impacto observado ou esperado;
-- sugestão de correção, se disponível.
+- the affected version or commit;
+- the environment and Linux distribution;
+- steps to reproduce the issue;
+- the observed or expected impact;
+- a suggested fix, if available.
 
-Evite anexar credenciais, chaves privadas, dados de clientes ou configurações de produção. O mantenedor confirmará o recebimento e coordenará a divulgação após a correção.
+Do not attach credentials, private keys, customer data, or production configuration. The maintainer will acknowledge the report and coordinate disclosure after a fix is available.

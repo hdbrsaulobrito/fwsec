@@ -1,32 +1,36 @@
-# Contribuindo com o fwsec
+# Contributing to fwsec
 
-O repositório aceita contribuições por pull request. Não faça push direto para `main`.
+Contributions are accepted through pull requests. Do not push directly to `main`.
 
-## Fluxo obrigatório
+## Required workflow
 
-1. Crie uma branch a partir da `main`.
-2. Faça uma alteração pequena e autocontida.
-3. Execute as validações aplicáveis.
-4. Atualize a documentação quando o comportamento público mudar.
-5. Abra um pull request descrevendo mudança, motivação, impacto e testes.
-6. Solicite a revisão de `@hdbrsaulobrito`.
+1. Create a branch from `main`.
+2. Make a small, self-contained change.
+3. Run the applicable validation commands.
+4. Update the documentation whenever public behavior changes.
+5. Open a pull request describing the change, motivation, impact, and tests.
+6. Request a review from `@hdbrsaulobrito`.
 
-Todo arquivo pertence a `@hdbrsaulobrito` por meio do `CODEOWNERS`. Somente a aprovação desse mantenedor satisfaz o requisito de revisão para merge na branch protegida.
+Every file is assigned to `@hdbrsaulobrito` through `CODEOWNERS`. Only that maintainer's approval satisfies the review requirement for merging into the protected branch.
 
-## Validação mínima
+## Minimum validation
 
 ```bash
 python3 -m compileall -q src
 bash -n install.sh
 ```
 
-Quando disponíveis, execute também:
+When available, also run:
 
 ```bash
 ruff check src
 mypy src
 ```
 
-## Segurança
+## Security
 
-Não inclua credenciais, tokens, IPs internos, dados de clientes ou configurações reais. Vulnerabilidades devem seguir o processo descrito em [SECURITY.md](SECURITY.md), sem issue pública.
+Do not include credentials, tokens, internal IP addresses, customer data, or production configuration. Report vulnerabilities privately by following [SECURITY.md](SECURITY.md); do not open a public issue.
+
+## License
+
+By contributing, you agree that your contribution is licensed under the project's [GNU General Public License version 2 only](LICENSE), SPDX identifier `GPL-2.0-only`.

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
 """
 Persistent JSON state — tracks metadata for IPs managed by fwsec.
 
