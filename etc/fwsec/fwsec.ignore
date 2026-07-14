@@ -1,0 +1,5 @@
+# fwsec.ignore - IPs exempt from automatic blocking
+# (CrowdSec and fwsec will not auto-ban these IPs)
+# Format: IP/CIDR  # optional comment
+127.0.0.1     # localhost
+::1           # localhost IPv6

@@ -1,0 +1,5 @@
+# fwsec.allow - IP Whitelist
+# Format: IP/CIDR  # optional comment
+# Examples:
+#   192.168.1.0/24  # LAN
+#   203.0.113.5     # Escritório SP

@@ -1,0 +1,34 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "fwsec"
+version = "1.0.0"
+description = "nftables + CrowdSec firewall manager — CSF-style CLI"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/HostDimeBR/fwsec"
+Repository = "https://github.com/HostDimeBR/fwsec.git"
+Issues = "https://github.com/HostDimeBR/fwsec/issues"
+Security = "https://github.com/HostDimeBR/fwsec/security/policy"
+
+[project.scripts]
+fwsec = "fwsec.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/fwsec"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
