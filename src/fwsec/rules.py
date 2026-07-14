@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
 """
 nftables ruleset generator for the main `inet filter` table.
 

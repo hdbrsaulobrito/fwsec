@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
 """
 Config management: fwsec.conf, fwsec.allow, fwsec.deny, fwsec.ignore
 """

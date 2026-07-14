@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
 """
 fwsec — nftables + CrowdSec firewall manager
 CSF-style CLI interface

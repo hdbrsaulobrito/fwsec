@@ -1,205 +1,187 @@
 # fwsec
 
-**nftables + CrowdSec firewall manager** — interface CLI estilo CSF para gerenciar um firewall moderno em Linux.
+**nftables + CrowdSec firewall manager** — a CSF-style command-line interface for managing a modern Linux firewall.
 
-O fwsec é distribuído e mantido como um projeto independente. Todo o código, os arquivos de configuração e o instalador necessários estão neste repositório.
+fwsec is distributed and maintained as an independent project. This repository contains all source code, configuration templates, and installation resources required to use it.
 
-> Suporta: Ubuntu 24+ · Rocky Linux 8 / 9 / 10
+> Supported systems: Ubuntu 24+ · Rocky Linux 8 / 9 / 10
 
----
-
-## Instalação
+## Installation
 
 ```bash
-git clone https://github.com/HostDimeBR/fwsec.git
+git clone https://github.com/hdbrsaulobrito/fwsec.git
 cd fwsec
 sudo bash install.sh
 ```
 
-| Flag | Comportamento |
+| Flag | Behavior |
 |---|---|
-| *(sem flags)* | Instala. Se já instalado, exibe status e sai. |
-| `--upgrade` | Atualiza pacote + binário, preserva configs. |
-| `--force` | Reinstalação completa. |
+| *(no flags)* | Installs fwsec. If it is already installed, displays its status and exits. |
+| `--upgrade` | Upgrades the package and executable while preserving configuration files. |
+| `--force` | Performs a complete reinstallation. |
 
----
+## Quick reference
 
-## Cheatsheet
-
-### Lifecycle do firewall
+### Firewall lifecycle
 
 ```bash
-fwsec -s          # Iniciar firewall
-fwsec -f          # Parar firewall (flush de regras)
-fwsec -r          # Reiniciar / recarregar regras
-fwsec -e          # Habilitar fwsec
-fwsec -x          # Desabilitar fwsec
-fwsec -c          # Verificar configuração
-fwsec -l          # Listar regras carregadas
-fwsec -v          # Ver versão (fwsec + CrowdSec + nftables)
+fwsec -s          # Start the firewall
+fwsec -f          # Stop the firewall and flush its rules
+fwsec -r          # Restart or reload the rules
+fwsec -e          # Enable fwsec
+fwsec -x          # Disable fwsec
+fwsec -c          # Validate the configuration
+fwsec -l          # List loaded rules
+fwsec -v          # Show fwsec, CrowdSec, and nftables versions
 ```
 
----
-
-### Bloquear IPs (deny)
+### Deny IP addresses
 
 ```bash
-# Bloquear permanentemente
+# Block permanently
 fwsec -d 1.2.3.4
-fwsec -d 1.2.3.4 "Ataque SSH"
-fwsec -d 192.168.0.0/24 "Rede suspeita"
+fwsec -d 1.2.3.4 "SSH attack"
+fwsec -d 192.168.0.0/24 "Suspicious network"
 
-# Bloquear temporariamente
-fwsec -td 1.2.3.4 3600              # 1 hora
-fwsec -td 1.2.3.4 86400 "Brute force"  # 24 horas
-fwsec -td 1.2.3.4 300 "Scan de porta"  # 5 minutos
+# Block temporarily
+fwsec -td 1.2.3.4 3600                  # 1 hour
+fwsec -td 1.2.3.4 86400 "Brute force"  # 24 hours
+fwsec -td 1.2.3.4 300 "Port scan"      # 5 minutes
 
-# Remover bloqueio permanente
+# Remove a permanent block
 fwsec -dr 1.2.3.4
 
-# Remover bloqueio temporário
+# Remove a temporary block
 fwsec -tr 1.2.3.4
 
-# Ver bloqueios temporários ativos
+# Show active temporary blocks
 fwsec -t
 ```
 
----
-
-### Liberar IPs (allow / whitelist)
+### Allow IP addresses
 
 ```bash
-# Adicionar à whitelist
+# Add to the allow list
 fwsec -a 1.2.3.4
-fwsec -a 1.2.3.4 "Escritório SP"
-fwsec -a 10.0.0.0/8 "Rede interna"
+fwsec -a 1.2.3.4 "São Paulo office"
+fwsec -a 10.0.0.0/8 "Internal network"
 
-# Remover da whitelist
+# Remove from the allow list
 fwsec -ar 1.2.3.4
 ```
 
-> IPs na whitelist têm prioridade máxima — passam antes de qualquer regra de bloqueio (inclusive CrowdSec).
+> Allow-listed IP addresses have the highest priority and are accepted before every blocking rule, including CrowdSec rules.
 
----
-
-### Pesquisar IP / domínio
+### Search for an IP address or domain
 
 ```bash
-fwsec -g 1.2.3.4        # Busca em todas as listas + CrowdSec
-fwsec -g 192.168.1.0/24 # Busca por CIDR
-fwsec -g example.com    # Resolve o domínio e busca os IPs
+fwsec -g 1.2.3.4         # Search every list and CrowdSec
+fwsec -g 192.168.1.0/24  # Search for a CIDR range
+fwsec -g example.com     # Resolve the domain and search for its IP addresses
 ```
 
-Exibe onde o IP aparece: `fwsec.allow`, `fwsec.deny`, bloqueios temporários, decisões CrowdSec.
+The result identifies whether the address appears in `fwsec.allow`, `fwsec.deny`, temporary blocks, or CrowdSec decisions.
 
----
+## Command reference
 
-## Referência de comandos
-
-| Comando | Descrição |
+| Command | Description |
 |---|---|
-| `fwsec -v` | Ver versão |
-| `fwsec -l` | Ver regras carregadas |
-| `fwsec -s` | Iniciar firewall |
-| `fwsec -f` | Parar firewall |
-| `fwsec -x` | Desabilitar fwsec |
-| `fwsec -e` | Habilitar fwsec |
-| `fwsec -r` | Reiniciar / recarregar regras |
-| `fwsec -c` | Verificar configuração |
-| `fwsec -d IP` | Bloquear IP permanente |
-| `fwsec -d IP "motivo"` | Bloquear IP com comentário |
-| `fwsec -td IP segundos "motivo"` | Bloquear IP temporariamente |
-| `fwsec -t` | Ver bloqueios temporários |
-| `fwsec -tr IP` | Remover bloqueio temporário |
-| `fwsec -dr IP` | Remover bloqueio permanente |
-| `fwsec -a IP` | Adicionar IP à whitelist |
-| `fwsec -a IP "motivo"` | Adicionar à whitelist com comentário |
-| `fwsec -ar IP` | Remover IP da whitelist |
-| `fwsec -g IP` | Pesquisar IP nas listas e regras |
-| `fwsec -g domínio` | Pesquisar domínio |
+| `fwsec -v` | Show version information |
+| `fwsec -l` | Show loaded rules |
+| `fwsec -s` | Start the firewall |
+| `fwsec -f` | Stop the firewall |
+| `fwsec -x` | Disable fwsec |
+| `fwsec -e` | Enable fwsec |
+| `fwsec -r` | Restart or reload the rules |
+| `fwsec -c` | Validate the configuration |
+| `fwsec -d IP` | Block an IP address permanently |
+| `fwsec -d IP "reason"` | Block an IP address with a comment |
+| `fwsec -td IP seconds "reason"` | Block an IP address temporarily |
+| `fwsec -t` | Show temporary blocks |
+| `fwsec -tr IP` | Remove a temporary block |
+| `fwsec -dr IP` | Remove a permanent block |
+| `fwsec -a IP` | Add an IP address to the allow list |
+| `fwsec -a IP "reason"` | Add an IP address to the allow list with a comment |
+| `fwsec -ar IP` | Remove an IP address from the allow list |
+| `fwsec -g IP` | Search for an IP address in lists and rules |
+| `fwsec -g domain` | Search for a domain |
 
----
+## Configuration files
 
-## Arquivos de configuração
-
-| Arquivo | Descrição |
+| File | Description |
 |---|---|
-| `/etc/fwsec/fwsec.conf` | Configuração principal (portas, CrowdSec, log) |
-| `/etc/fwsec/fwsec.allow` | Whitelist permanente (IPs/CIDRs) |
-| `/etc/fwsec/fwsec.deny` | Blacklist permanente (IPs/CIDRs) |
-| `/etc/fwsec/fwsec.ignore` | IPs imunes a auto-ban |
-| `/etc/fwsec/fwsec.state.json` | Estado interno (temp blocks + metadados) |
-| `/var/log/fwsec.log` | Log de operações |
+| `/etc/fwsec/fwsec.conf` | Main configuration: ports, CrowdSec, and logging |
+| `/etc/fwsec/fwsec.allow` | Permanent allow list containing IP addresses and CIDR ranges |
+| `/etc/fwsec/fwsec.deny` | Permanent deny list containing IP addresses and CIDR ranges |
+| `/etc/fwsec/fwsec.ignore` | IP addresses exempt from automatic bans |
+| `/etc/fwsec/fwsec.state.json` | Internal state for temporary blocks and metadata |
+| `/var/log/fwsec.log` | Operation log |
 
-### fwsec.conf — principais opções
+### Main `fwsec.conf` options
 
 ```ini
 [firewall]
-ENABLED    = 1           # 1 = ativo, 0 = desabilitado
-TCP_IN     = 1157        # Portas TCP inbound permitidas
-TCP_OUT    = 80,443,53   # Portas TCP outbound permitidas
-UDP_IN     = 53          # Portas UDP inbound
-UDP_OUT    = 53,123      # Portas UDP outbound
-ICMP_IN    = 1           # Permitir ping
-IPV6       = 1           # Suporte IPv6
+ENABLED    = 1           # 1 = enabled, 0 = disabled
+TCP_IN     = 1157        # Allowed inbound TCP ports
+TCP_OUT    = 80,443,53   # Allowed outbound TCP ports
+UDP_IN     = 53          # Allowed inbound UDP ports
+UDP_OUT    = 53,123      # Allowed outbound UDP ports
+ICMP_IN    = 1           # Allow inbound ping
+IPV6       = 1           # Enable IPv6 support
 
 [crowdsec]
-ENABLED    = 1           # Integração CrowdSec
-SYNC_DENY  = 1           # Sincronizar fwsec -d com decisões CrowdSec
+ENABLED    = 1           # Enable CrowdSec integration
+SYNC_DENY  = 1           # Synchronize fwsec -d bans with CrowdSec decisions
 ```
 
----
+## nftables architecture
 
-## Arquitetura nftables
+fwsec operates with two parallel nftables tables:
 
-O fwsec opera com duas tabelas nftables paralelas:
-
-```
-Pacote inbound
-      │
-      ▼
-┌─────────────────────────────────────────────┐
-│  table inet fwsec / chain whitelist         │  priority -100
-│  ip saddr @allow4 → ACCEPT imediato         │
-└─────────────────────────────────────────────┘
-      │ (não whitelist)
-      ▼
-┌─────────────────────────────────────────────┐
-│  table inet fwsec / chain blacklist         │  priority -50
-│  ip saddr @deny4  → DROP                    │
-└─────────────────────────────────────────────┘
-      │ (não blacklist)
-      ▼
-┌─────────────────────────────────────────────┐
-│  table inet filter / chain input            │  priority 0
-│  established/related → ACCEPT               │
-│  @crowdsec-blacklists → DROP                │
-│  tcp dport <SSH> → ACCEPT                   │
-│  policy: DROP                               │
-└─────────────────────────────────────────────┘
+```text
+Inbound packet
+      |
+      v
++---------------------------------------------+
+| table inet fwsec / chain whitelist          | priority -100
+| ip saddr @allow4 -> ACCEPT immediately      |
++---------------------------------------------+
+      | (not allow-listed)
+      v
++---------------------------------------------+
+| table inet fwsec / chain blacklist          | priority -50
+| ip saddr @deny4 -> DROP                     |
++---------------------------------------------+
+      | (not deny-listed)
+      v
++---------------------------------------------+
+| table inet filter / chain input             | priority 0
+| established/related -> ACCEPT               |
+| @crowdsec-blacklists -> DROP                |
+| tcp dport <SSH> -> ACCEPT                   |
+| policy: DROP                                |
++---------------------------------------------+
 ```
 
-- **`@allow4` / `@allow6`** — sets gerenciados por `fwsec -a`
-- **`@deny4` / `@deny6`** — sets gerenciados por `fwsec -d` e `fwsec -td` (com timeout nativo)
-- **`@crowdsec-blacklists`** — sets gerenciados automaticamente pelo CrowdSec bouncer
+- **`@allow4` / `@allow6`** — sets managed by `fwsec -a`
+- **`@deny4` / `@deny6`** — sets managed by `fwsec -d` and `fwsec -td`, with native timeouts
+- **`@crowdsec-blacklists`** — sets managed automatically by the CrowdSec bouncer
 
----
+## CrowdSec integration
 
-## Integração CrowdSec
-
-Quando `SYNC_DENY = 1` (padrão), `fwsec -d` e `fwsec -td` também criam decisões no CrowdSec:
+When `SYNC_DENY = 1` (the default), `fwsec -d` and `fwsec -td` also create CrowdSec decisions:
 
 ```bash
-fwsec -d 1.2.3.4 "Ataque SSH"
-# → nftables set deny4 ← bloqueio imediato
-# → cscli decisions add --ip 1.2.3.4 ← propagado ao bouncer
+fwsec -d 1.2.3.4 "SSH attack"
+# -> nftables set deny4: immediate block
+# -> cscli decisions add --ip 1.2.3.4: propagated to the bouncer
 
 fwsec -td 1.2.3.4 3600 "Brute force"
-# → nftables set deny4 timeout 3600s ← expira automaticamente
-# → cscli decisions add --duration 3600s
+# -> nftables set deny4 timeout 3600s: expires automatically
+# -> cscli decisions add --duration 3600s
 ```
 
-Ver decisões ativas do CrowdSec:
+Show active CrowdSec decisions:
 
 ```bash
 cscli decisions list
@@ -207,48 +189,46 @@ cscli alerts list
 cscli metrics
 ```
 
----
-
-## Serviço systemd
+## systemd service
 
 ```bash
-systemctl status fwsec        # Status do serviço
-systemctl start fwsec         # Iniciar
-systemctl stop fwsec          # Parar
-systemctl restart fwsec       # Reiniciar
-systemctl enable fwsec        # Habilitar no boot
-systemctl disable fwsec       # Desabilitar no boot
-journalctl -u fwsec -f        # Ver logs em tempo real
+systemctl status fwsec        # Show service status
+systemctl start fwsec         # Start
+systemctl stop fwsec          # Stop
+systemctl restart fwsec       # Restart
+systemctl enable fwsec        # Enable at boot
+systemctl disable fwsec       # Disable at boot
+journalctl -u fwsec -f        # Follow logs
 ```
 
----
-
-## Exemplos práticos
+## Practical examples
 
 ```bash
-# Bloquear um atacante por 24h e registrar motivo
-fwsec -td 203.0.113.99 86400 "Brute force SSH detectado"
+# Block an attacker for 24 hours and record the reason
+fwsec -td 203.0.113.99 86400 "SSH brute force detected"
 
-# Liberar IP do escritório permanentemente
-fwsec -a 177.20.10.5 "Escritório RJ"
+# Permanently allow an office IP address
+fwsec -a 177.20.10.5 "Rio de Janeiro office"
 
-# Verificar se um IP está em alguma lista antes de liberar
+# Check every list before allowing an IP address
 fwsec -g 203.0.113.99
 
-# Após investigação, bloquear permanentemente
-fwsec -d 203.0.113.99 "Confirmado malicioso"
+# Permanently block the address after investigation
+fwsec -d 203.0.113.99 "Confirmed malicious"
 
-# Recarregar todas as regras após editar fwsec.allow manualmente
+# Reload every rule after manually editing fwsec.allow
 fwsec -r
 
-# Ver estado completo do firewall
+# Show the complete firewall state
 fwsec -c && fwsec -l
 ```
 
----
+## Development and governance
 
-## Desenvolvimento e governança
+See [CONTRIBUTING.md](CONTRIBUTING.md) before preparing a change. The `main` branch is protected: every change must be submitted through a pull request and requires approval from `@hdbrsaulobrito`. Direct pushes and merges without that approval are not permitted.
 
-Consulte [CONTRIBUTING.md](CONTRIBUTING.md) para preparar alterações. A branch `main` é protegida: toda mudança deve ser enviada por pull request e depende da aprovação exclusiva de `@hdbrsaulobrito`. Push direto e merge sem essa aprovação não são permitidos.
+Do not disclose security vulnerabilities in public issues. Use **Security → Report a vulnerability** and follow [SECURITY.md](SECURITY.md).
 
-Falhas de segurança não devem ser publicadas em issues. Use o recurso **Report a vulnerability** na aba **Security** do repositório, conforme [SECURITY.md](SECURITY.md).
+## License
+
+fwsec is licensed under the [GNU General Public License version 2 only](LICENSE), identified by the SPDX expression `GPL-2.0-only`. This is the same base license used by the Linux kernel; the kernel-specific syscall exception is not part of this project.

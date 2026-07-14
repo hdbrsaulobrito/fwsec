@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
 """
 CrowdSec abstraction — wraps cscli for decisions, bouncers and hub status.
 """
