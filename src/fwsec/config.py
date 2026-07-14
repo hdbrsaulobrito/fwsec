@@ -30,6 +30,10 @@ DEFAULTS: dict[str, dict[str, str]] = {
         "DENY_TEMP_IP_LIMIT": "100",
         "DENY_IP_LIMIT": "1000",
     },
+    "containers": {
+        "CONTAINER_MODE": "0",
+        "CONTAINER_POLICY": "open",
+    },
     "crowdsec": {
         "ENABLED": "1",
         "API_URL": "http://127.0.0.1:8080",
@@ -53,6 +57,8 @@ class FwsecConfig:
     ipv6: bool = True
     deny_temp_limit: int = 100
     deny_limit: int = 1000
+    container_mode: bool = False
+    container_policy: str = "open"
     crowdsec_enabled: bool = True
     crowdsec_api: str = "http://127.0.0.1:8080"
     crowdsec_sync_deny: bool = True
@@ -69,6 +75,7 @@ def load_config() -> FwsecConfig:
         parser.read(CONF_FILE)
 
     fw = parser["firewall"]
+    ct = parser["containers"]
     cs = parser["crowdsec"]
     lg = parser["logging"]
 
@@ -82,6 +89,8 @@ def load_config() -> FwsecConfig:
         ipv6=fw.getboolean("IPV6", True),
         deny_temp_limit=fw.getint("DENY_TEMP_IP_LIMIT", 100),
         deny_limit=fw.getint("DENY_IP_LIMIT", 1000),
+        container_mode=ct.getboolean("CONTAINER_MODE", False),
+        container_policy=ct.get("CONTAINER_POLICY", "open").strip().lower(),
         crowdsec_enabled=cs.getboolean("ENABLED", True),
         crowdsec_api=cs.get("API_URL", "http://127.0.0.1:8080"),
         crowdsec_sync_deny=cs.getboolean("SYNC_DENY", True),

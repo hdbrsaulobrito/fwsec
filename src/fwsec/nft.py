@@ -113,6 +113,18 @@ table {NFT_FAMILY} {NFT_TABLE} {{
         ip  saddr @{SET_DENY4} drop
         ip6 saddr @{SET_DENY6} drop
     }}
+
+    chain whitelist_forward {{
+        type filter hook forward priority -100; policy accept;
+        ip  saddr @{SET_ALLOW4} accept
+        ip6 saddr @{SET_ALLOW6} accept
+    }}
+
+    chain blacklist_forward {{
+        type filter hook forward priority -50; policy accept;
+        ip  saddr @{SET_DENY4} drop
+        ip6 saddr @{SET_DENY6} drop
+    }}
 }}
 """
     _run_script(script)
@@ -222,6 +234,20 @@ def get_summary() -> SetSummary:
 def list_ruleset() -> str:
     _, out, _ = _run("list", "ruleset")
     return out
+
+
+def list_fwsec_tables() -> str:
+    """Return only the tables fwsec owns (inet filter + inet fwsec).
+
+    Used for persistence: saving the full ruleset would freeze dynamic rules
+    from other owners (Docker, Podman, libvirt) into /etc/nftables.conf.
+    """
+    parts = []
+    for table in ("filter", NFT_TABLE):
+        rc, out, _ = _run("list", "table", NFT_FAMILY, table)
+        if rc == 0 and out.strip():
+            parts.append(out.strip())
+    return ("\n\n".join(parts) + "\n") if parts else ""
 
 
 def get_full_set_output(set_name: str) -> str:
