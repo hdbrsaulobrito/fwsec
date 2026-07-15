@@ -357,26 +357,45 @@ configure_apparmor() {
 # Disable competing firewalls
 # =============================================================================
 disable_competing_firewalls() {
-    info "Checking for competing firewalls..."
-    case "$OS_FAMILY" in
-        rhel)
-            if systemctl is-active --quiet firewalld 2>/dev/null; then
-                systemctl stop firewalld
-                systemctl disable firewalld
-                ok "firewalld disabled; fwsec/nftables will take control."
-            else
-                ok "firewalld is not active."
-            fi
-            ;;
-        debian)
-            if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "active"; then
-                ufw disable 2>/dev/null || true
-                ok "UFW disabled; fwsec/nftables will take control."
-            else
-                ok "UFW is not active."
-            fi
-            ;;
-    esac
+    info "Checking for competing firewalls (nftables must be managed only by fwsec)..."
+
+    # firewalld — checked on every distro, not only RHEL-family
+    if systemctl is-active --quiet firewalld 2>/dev/null || \
+       systemctl is-enabled --quiet firewalld 2>/dev/null; then
+        systemctl stop firewalld 2>/dev/null || true
+        systemctl disable firewalld 2>/dev/null || true
+        systemctl mask firewalld 2>/dev/null || true
+        ok "firewalld stopped, disabled and masked."
+    else
+        ok "firewalld is not active."
+    fi
+
+    # UFW — checked on every distro, not only Debian-family
+    if command -v ufw &>/dev/null; then
+        if ufw status 2>/dev/null | grep -q "^Status: active"; then
+            ufw --force disable >/dev/null 2>&1 || true
+            ok "UFW disabled."
+        else
+            ok "UFW is installed but not active."
+        fi
+        systemctl stop ufw 2>/dev/null || true
+        systemctl disable ufw 2>/dev/null || true
+        systemctl mask ufw 2>/dev/null || true
+    else
+        ok "UFW is not installed."
+    fi
+
+    # Legacy iptables rule restorers — they would fight fwsec's ruleset at boot
+    local svc
+    for svc in iptables ip6tables netfilter-persistent; do
+        if systemctl is-enabled --quiet "$svc" 2>/dev/null; then
+            systemctl stop "$svc" 2>/dev/null || true
+            systemctl disable "$svc" 2>/dev/null || true
+            warn "${svc}.service disabled (it restored iptables rules at boot)."
+        fi
+    done
+
+    ok "nftables will be managed exclusively by fwsec."
 }
 
 # =============================================================================
@@ -487,6 +506,17 @@ post_install_check() {
     command -v crowdsec &>/dev/null       && ok "  crowdsec: OK" || { warn "  crowdsec: not found"; }
     command -v cscli &>/dev/null          && ok "  cscli: OK" || { warn "  cscli: not found"; }
     systemctl is-enabled fwsec &>/dev/null && ok "  fwsec.service: enabled" || { warn "  fwsec.service: not enabled"; }
+
+    if systemctl is-active --quiet firewalld 2>/dev/null; then
+        err "  firewalld: STILL ACTIVE (conflicts with fwsec)"; ((issues++))
+    else
+        ok "  firewalld: inactive"
+    fi
+    if command -v ufw &>/dev/null && ufw status 2>/dev/null | grep -q "^Status: active"; then
+        err "  ufw: STILL ACTIVE (conflicts with fwsec)"; ((issues++))
+    else
+        ok "  ufw: inactive"
+    fi
 
     return $issues
 }

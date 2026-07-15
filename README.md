@@ -20,6 +20,8 @@ sudo bash install.sh
 | `--upgrade` | Queries the GitHub repository for the latest version. When a newer release is available, downloads it and upgrades the package and executable while preserving configuration files; otherwise reports that fwsec is up to date. |
 | `--force` | Performs a complete reinstallation. |
 
+The installer also detects competing firewalls — **firewalld** and **UFW** on any supported distribution, plus legacy iptables rule-restore services (`iptables.service`, `netfilter-persistent`) — and stops, disables, and masks them, so nftables is managed exclusively by fwsec. The post-installation check fails loudly if either firewall is still active.
+
 ### Interactive port selection
 
 During installation, the installer scans the system with `ss` and lists every service currently listening (port, protocol, and service name). It then asks which ports to keep open for each direction:
