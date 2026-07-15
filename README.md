@@ -6,7 +6,22 @@ fwsec is distributed and maintained as an independent project. This repository c
 
 > Supported systems: Ubuntu 24+ · Rocky Linux 8 / 9 / 10
 
-## Installation
+## Quick install
+
+No git required — the installer downloads the latest fwsec release by itself:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/hdbrsaulobrito/fwsec/main/install.sh | sudo bash
+```
+
+When piped like this the install is non-interactive: detected inbound ports and safe outbound defaults are applied automatically. To answer the interactive prompts (port selection, container policy), download the installer first and run it from a terminal:
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/hdbrsaulobrito/fwsec/main/install.sh
+sudo bash install.sh
+```
+
+## Installation from source
 
 ```bash
 git clone https://github.com/hdbrsaulobrito/fwsec.git
