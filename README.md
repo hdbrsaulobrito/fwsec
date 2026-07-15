@@ -58,7 +58,7 @@ fwsec -r          # Restart or reload the rules
 fwsec -e          # Enable fwsec
 fwsec -x          # Disable fwsec
 fwsec -c          # Validate the configuration
-fwsec -l          # List loaded rules
+fwsec -l          # List loaded rules and allowed ports (in/out, TCP/UDP)
 fwsec -v          # Show fwsec, CrowdSec, and nftables versions
 ```
 
@@ -114,7 +114,7 @@ The result identifies whether the address appears in `fwsec.allow`, `fwsec.deny`
 | Command | Description |
 |---|---|
 | `fwsec -v` | Show version information |
-| `fwsec -l` | Show loaded rules |
+| `fwsec -l` | Show loaded rules, including every allowed port (TCP/UDP, inbound and outbound, plus the auto-detected SSH port and ICMP state) |
 | `fwsec -s` | Start the firewall |
 | `fwsec -f` | Stop the firewall |
 | `fwsec -x` | Disable fwsec |
