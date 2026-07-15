@@ -21,6 +21,14 @@ curl -fsSLO https://raw.githubusercontent.com/hdbrsaulobrito/fwsec/main/install.
 sudo bash install.sh
 ```
 
+## Updating
+
+```bash
+sudo fwsec --upgrade
+```
+
+fwsec checks the GitHub repository for a newer release; when one is available it downloads it and updates the code, features, and executable. **Local configuration is never overwritten**: `fwsec.conf`, the allow/deny/ignore lists, and the temporary-block state in `/etc/fwsec` stay exactly as they are, and the rules are reloaded from them after the update. If nothing newer exists, it reports that fwsec is up to date. (`sudo bash install.sh --upgrade` remains available and does the same.)
+
 ## Installation from source
 
 ```bash
@@ -114,6 +122,7 @@ The result identifies whether the address appears in `fwsec.allow`, `fwsec.deny`
 | Command | Description |
 |---|---|
 | `fwsec -v` | Show version information |
+| `fwsec --upgrade` | Update fwsec from the GitHub repository, preserving all local configuration |
 | `fwsec -l` | Show loaded rules, including every allowed port (TCP/UDP, inbound and outbound, plus the auto-detected SSH port and ICMP state) |
 | `fwsec -s` | Start the firewall |
 | `fwsec -f` | Stop the firewall |

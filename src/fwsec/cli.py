@@ -18,7 +18,7 @@ from pathlib import Path
 
 from fwsec import __version__
 from fwsec import config as cfg
-from fwsec import containers, crowdsec, nft, rules, state
+from fwsec import containers, crowdsec, nft, rules, state, upgrade
 
 # ---------------------------------------------------------------------------
 # Output helpers
@@ -562,6 +562,39 @@ def cmd_grep(args: argparse.Namespace) -> None:
     print()
 
 
+def cmd_upgrade(_args: argparse.Namespace) -> None:
+    """Update fwsec from the GitHub repository, preserving local configuration."""
+    _require_root()
+    _info(f"Installed version : {__version__}")
+    _info(f"Checking the repository ({upgrade.REPO}) for updates...")
+
+    remote = upgrade.fetch_remote_version()
+    if not remote:
+        _err("Could not query the latest version. Check network connectivity.")
+        sys.exit(1)
+    _info(f"Repository version: {remote}")
+
+    if not upgrade.is_newer(remote, __version__):
+        _ok(f"fwsec {__version__} is already up to date. Nothing to do.")
+        return
+
+    _info(f"Downloading fwsec {remote}...")
+    src = upgrade.download_source(remote)
+    if not src:
+        _err("Failed to download the new version from the repository.")
+        sys.exit(1)
+
+    installer = src / "install.sh"
+    if not installer.exists():
+        _err("Downloaded source has no install.sh; aborting.")
+        sys.exit(1)
+
+    _info("Local configuration in /etc/fwsec (fwsec.conf, allow/deny/ignore "
+          "lists, state) is preserved — only code and executable are updated.")
+    rc = subprocess.call(["bash", str(installer), "--upgrade"])
+    sys.exit(rc)
+
+
 # ---------------------------------------------------------------------------
 # Utility
 # ---------------------------------------------------------------------------
@@ -614,6 +647,7 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
+  fwsec --upgrade                   Update fwsec from GitHub (config preserved)
   fwsec -s                          Start firewall
   fwsec -r                          Reload rules
   fwsec -l                          List loaded rules
@@ -633,6 +667,9 @@ Examples:
     g = p.add_mutually_exclusive_group()
 
     g.add_argument("-v", "--version",   action="store_true", help="Show version")
+    g.add_argument("--upgrade",         action="store_true",
+                   help="Update fwsec from the GitHub repository "
+                        "(local configuration is preserved)")
     g.add_argument("-l", "--list",      action="store_true", help="List loaded rules")
     g.add_argument("-s", "--start",     action="store_true", help="Start firewall")
     g.add_argument("-f", "--stop",      action="store_true", help="Stop firewall (flush rules)")
@@ -676,6 +713,9 @@ def main() -> None:
     # Map parsed args to command functions
     if args.version:
         cmd_version(args)
+
+    elif args.upgrade:
+        cmd_upgrade(args)
 
     elif args.list:
         cmd_list(args)
