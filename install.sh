@@ -627,6 +627,73 @@ run_upgrade() {
 }
 
 # =============================================================================
+# Hosting control panel detection (cPanel / Plesk)
+# =============================================================================
+# Port profiles based on the panels' official firewall requirements.
+# SSH is detected separately and always kept open.
+CPANEL_TCP_IN="20,21,25,53,80,110,143,443,465,587,993,995,2077,2078,2079,2080,2082,2083,2086,2087,2095,2096"
+CPANEL_TCP_OUT="20,21,25,37,43,53,80,110,113,443,465,587,873,993,995,2086,2087,2089,2703"
+CPANEL_UDP_IN="53,853"
+CPANEL_UDP_OUT="53,113,123,873,6277,24441"
+
+PLESK_TCP_IN="21,25,53,80,110,143,443,465,587,990,993,995,8443,8447,8880"
+PLESK_TCP_OUT="25,37,43,53,80,113,443,465,587,993,995,5224,8443"
+PLESK_UDP_IN="53"
+PLESK_UDP_OUT="53,123"
+
+detect_panel() {
+    PANEL=""
+    PANEL_NAME=""
+    if [[ -d /usr/local/cpanel ]] || command -v whmapi1 &>/dev/null; then
+        PANEL="cpanel"; PANEL_NAME="cPanel/WHM"
+    elif [[ -f /usr/local/psa/version || -f /opt/psa/version ]] || command -v plesk &>/dev/null; then
+        PANEL="plesk"; PANEL_NAME="Plesk"
+    fi
+}
+
+_apply_panel_profile() {
+    # Returns 0 when the panel profile was applied (generic prompts skipped);
+    # returns 1 when the user prefers to open ports on demand.
+    local tcp_in tcp_out udp_in udp_out
+    case "$PANEL" in
+        cpanel) tcp_in="$CPANEL_TCP_IN"; tcp_out="$CPANEL_TCP_OUT"
+                udp_in="$CPANEL_UDP_IN"; udp_out="$CPANEL_UDP_OUT" ;;
+        plesk)  tcp_in="$PLESK_TCP_IN";  tcp_out="$PLESK_TCP_OUT"
+                udp_in="$PLESK_UDP_IN";  udp_out="$PLESK_UDP_OUT" ;;
+        *)      return 1 ;;
+    esac
+
+    echo ""
+    ok "${PANEL_NAME} detected on this server."
+    info "fwsec can pre-open every port ${PANEL_NAME} needs to work correctly:"
+    echo "      TCP IN : ${tcp_in}"
+    echo "      TCP OUT: ${tcp_out}"
+    echo "      UDP IN : ${udp_in}"
+    echo "      UDP OUT: ${udp_out}"
+    info "Or start minimal and open ports on demand later"
+    info "(edit /etc/fwsec/fwsec.conf and run: fwsec -r)."
+
+    if [[ -t 0 ]]; then
+        local answer=""
+        read -r -p "$(echo -e "  ${BOLD}Apply the recommended ${PANEL_NAME} port profile?${NC} [Y/n]: ")" answer || answer=""
+        if [[ "${answer,,}" == "n" || "${answer,,}" == "no" ]]; then
+            info "Keeping minimal ports — choose them in the next step (open on demand later)."
+            return 1
+        fi
+    else
+        info "Non-interactive shell: applying the ${PANEL_NAME} profile so the panel keeps working."
+    fi
+
+    set_conf_value "TCP_IN"  "$tcp_in"
+    set_conf_value "TCP_OUT" "$tcp_out"
+    set_conf_value "UDP_IN"  "$udp_in"
+    set_conf_value "UDP_OUT" "$udp_out"
+    ok "${PANEL_NAME} port profile applied to ${CONFIG_DIR}/fwsec.conf."
+    ok "The SSH port is detected automatically and stays open."
+    return 0
+}
+
+# =============================================================================
 # Interactive port configuration
 # =============================================================================
 DEFAULT_TCP_OUT="80,443,53,853"   # HTTP, HTTPS, DNS, DNS-over-TLS
@@ -672,6 +739,15 @@ _prompt_ports() {
 configure_ports() {
     local conf="${CONFIG_DIR}/fwsec.conf"
     [[ -f "$conf" ]] || return 0
+
+    # Hosting panel (cPanel/Plesk): offer the panel's port profile first.
+    # Applied -> done; declined -> fall through to the generic port prompts.
+    detect_panel
+    if [[ -n "$PANEL" ]]; then
+        if _apply_panel_profile; then
+            return 0
+        fi
+    fi
 
     local ssh_port
     # `|| true`: sshd_config without an explicit Port line must not abort (set -e + pipefail)
