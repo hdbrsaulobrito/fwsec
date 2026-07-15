@@ -55,6 +55,15 @@ During installation, the installer scans the system with `ss` and lists every se
 
 At each prompt, press Enter to accept the suggestion, type a comma-separated list (ranges like `8000:8080` are allowed), or type `none`. The choices are written to `/etc/fwsec/fwsec.conf`. In non-interactive shells the detected inbound ports and the safe outbound defaults are applied automatically. If `fwsec.conf` already exists, the installer asks before reconfiguring ports.
 
+### Hosting control panels (cPanel / Plesk)
+
+The installer detects **cPanel/WHM** and **Plesk**. When one is found, it shows a recommended service-port profile based on the panel's official firewall requirements and asks whether to apply it:
+
+- **Apply the profile** (default, and automatic in non-interactive installs) — common TCP/UDP ports for mail, FTP, DNS, webmail, and the panel UI (2082–2096 for cPanel; 8443/8447/8880 for Plesk) are pre-opened. Remove ports for services that are disabled or not used.
+- **Open on demand** — decline the profile and fall through to the regular minimal port selection; add panel ports later by editing `/etc/fwsec/fwsec.conf` and running `fwsec -r`.
+
+The SSH port is detected separately and always stays open in either mode.
+
 ## Quick reference
 
 ### Firewall lifecycle
