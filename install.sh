@@ -629,7 +629,8 @@ run_upgrade() {
 # =============================================================================
 # Hosting control panel detection (cPanel / Plesk)
 # =============================================================================
-# Port profiles based on the panels' official firewall requirements.
+# Recommended service profiles based on the panels' official firewall requirements.
+# Administrators should remove ports for services they do not use.
 # SSH is detected separately and always kept open.
 CPANEL_TCP_IN="20,21,25,53,80,110,143,443,465,587,993,995,2077,2078,2079,2080,2082,2083,2086,2087,2095,2096"
 CPANEL_TCP_OUT="20,21,25,37,43,53,80,110,113,443,465,587,873,993,995,2086,2087,2089,2703"
@@ -637,8 +638,8 @@ CPANEL_UDP_IN="53,853"
 CPANEL_UDP_OUT="53,113,123,873,6277,24441"
 
 PLESK_TCP_IN="21,25,53,80,110,143,443,465,587,990,993,995,8443,8447,8880"
-PLESK_TCP_OUT="25,37,43,53,80,113,443,465,587,993,995,5224,8443"
-PLESK_UDP_IN="53"
+PLESK_TCP_OUT="25,37,43,53,80,113,443,465,587,993,995,8443"
+PLESK_UDP_IN="53,443,8443"
 PLESK_UDP_OUT="53,123"
 
 detect_panel() {
@@ -665,13 +666,14 @@ _apply_panel_profile() {
 
     echo ""
     ok "${PANEL_NAME} detected on this server."
-    info "fwsec can pre-open every port ${PANEL_NAME} needs to work correctly:"
+    info "fwsec can apply the recommended ${PANEL_NAME} service-port profile:"
     echo "      TCP IN : ${tcp_in}"
     echo "      TCP OUT: ${tcp_out}"
     echo "      UDP IN : ${udp_in}"
     echo "      UDP OUT: ${udp_out}"
     info "Or start minimal and open ports on demand later"
     info "(edit /etc/fwsec/fwsec.conf and run: fwsec -r)."
+    warn "Remove ports for panel services that are disabled or not used."
 
     if [[ -t 0 ]]; then
         local answer=""

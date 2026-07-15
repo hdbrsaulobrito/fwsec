@@ -57,9 +57,9 @@ At each prompt, press Enter to accept the suggestion, type a comma-separated lis
 
 ### Hosting control panels (cPanel / Plesk)
 
-The installer detects **cPanel/WHM** and **Plesk**. When one is found, it shows the panel's full port profile (based on each panel's official firewall requirements) and asks whether to apply it:
+The installer detects **cPanel/WHM** and **Plesk**. When one is found, it shows a recommended service-port profile based on the panel's official firewall requirements and asks whether to apply it:
 
-- **Apply the profile** (default, and automatic in non-interactive installs) — every TCP/UDP inbound and outbound port the panel needs is pre-opened, so mail, FTP, DNS, webmail, and the panel UI (2082–2096 for cPanel; 8443/8447/8880 for Plesk) keep working immediately.
+- **Apply the profile** (default, and automatic in non-interactive installs) — common TCP/UDP ports for mail, FTP, DNS, webmail, and the panel UI (2082–2096 for cPanel; 8443/8447/8880 for Plesk) are pre-opened. Remove ports for services that are disabled or not used.
 - **Open on demand** — decline the profile and fall through to the regular minimal port selection; add panel ports later by editing `/etc/fwsec/fwsec.conf` and running `fwsec -r`.
 
 The SSH port is detected separately and always stays open in either mode.
