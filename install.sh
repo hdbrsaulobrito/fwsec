@@ -6,7 +6,7 @@
 # =============================================================================
 set -euo pipefail
 
-FWSEC_VERSION="1.0.0"
+FWSEC_VERSION="1.1.0"
 REPO="hdbrsaulobrito/fwsec"
 INSTALL_DIR="/opt/fwsec"
 CONFIG_DIR="/etc/fwsec"
@@ -687,6 +687,192 @@ configure_ports() {
     ok "  TCP_OUT = ${tcp_out:-none}  |  UDP_OUT = ${udp_out:-none}"
 }
 
+# =============================================================================
+# Container support (Docker / Podman / nerdctl)
+# =============================================================================
+detect_container_runtimes() {
+    CONTAINER_RUNTIMES=""
+    local rt
+    for rt in docker podman nerdctl; do
+        if command -v "$rt" &>/dev/null; then
+            CONTAINER_RUNTIMES="${CONTAINER_RUNTIMES:+${CONTAINER_RUNTIMES} }${rt}"
+        fi
+    done
+}
+
+_list_published_ports() {
+    # Prints "HOSTPORT/PROTO -> container:port [runtime]" for running containers
+    local rt line
+    for rt in $CONTAINER_RUNTIMES; do
+        "$rt" ps --format '{{.Names}}\t{{.Ports}}' 2>/dev/null | while IFS=$'\t' read -r name ports; do
+            grep -oE '[^ ,]*:[0-9]+->[0-9]+/(tcp|udp)' <<< "$ports" | \
+            while read -r map; do
+                # Strip the host address (v4 or v6) — keep "HOSTPORT->CPORT/proto"
+                echo "    ${map##*:}  ${name} [${rt}]"
+            done
+        done
+    done | sort -u
+}
+
+_container_subnets() {
+    # Prints one container network subnet (CIDR) per line, all runtimes
+    local rt ids
+    for rt in $CONTAINER_RUNTIMES; do
+        ids=$("$rt" network ls -q 2>/dev/null) || continue
+        [[ -n "$ids" ]] || continue
+        # Docker/nerdctl: IPAM.Config[].Subnet — Podman: subnets[].subnet
+        "$rt" network inspect $ids 2>/dev/null | \
+            grep -oE '"([Ss]ubnet)":[[:space:]]*"[^"]+"' | \
+            sed -E 's/.*"([^"]+)"$/\1/'
+    done | sort -u
+}
+
+print_container_recommendations() {
+    echo ""
+    echo -e "  ${BOLD}Container security recommendations:${NC}"
+    echo -e "    • Bind internal-only services to localhost: ${BOLD}-p 127.0.0.1:5432:5432${NC}"
+    echo -e "      (never expose databases/admin panels on 0.0.0.0)."
+    echo -e "    • Published ports (-p) bypass the input firewall — fwsec covers them"
+    echo -e "      on the forward hook, and ${BOLD}CONTAINER_POLICY = filtered${NC} can restrict"
+    echo -e "      them to the allow list."
+    echo -e "    • Never expose the container engine socket (docker.sock/podman.sock)"
+    echo -e "      to containers or to the network."
+    echo -e "    • Prefer rootless mode (Podman rootless / Docker rootless) when possible."
+    echo -e "    • Keep images updated and from trusted registries only."
+    echo -e "    • Enable CrowdSec log acquisition for containers so attacks against"
+    echo -e "      containerized apps also generate bans."
+}
+
+configure_containers() {
+    local conf="${CONFIG_DIR}/fwsec.conf"
+    [[ -f "$conf" ]] || return 0
+
+    detect_container_runtimes
+
+    echo ""
+    echo -e "${BOLD}${CYAN}--------------------------------------------${NC}"
+    echo -e "${BOLD}${CYAN}  Container support${NC}"
+    echo -e "${BOLD}${CYAN}--------------------------------------------${NC}"
+    echo ""
+
+    local container_mode=0
+    if [[ -n "$CONTAINER_RUNTIMES" ]]; then
+        ok "Container runtime(s) detected: ${BOLD}${CONTAINER_RUNTIMES}${NC}"
+        container_mode=1
+        local published
+        published=$(_list_published_ports)
+        if [[ -n "$published" ]]; then
+            echo ""
+            info "Published container ports (host -> container):"
+            echo "$published"
+        fi
+    else
+        ok "No container runtime detected."
+        if [[ -t 0 ]]; then
+            local answer=""
+            read -r -p "$(echo -e "  ${BOLD}Do you plan to run containers (Docker/Podman) on this host?${NC} [y/N]: ")" answer || answer=""
+            if [[ "${answer,,}" == "y" || "${answer,,}" == "yes" ]]; then
+                container_mode=1
+                info "Container mode will be pre-enabled so the firewall does not break"
+                info "container networking when you install a runtime later."
+            fi
+        fi
+    fi
+
+    if [[ "$container_mode" -eq 0 ]]; then
+        set_conf_value "CONTAINER_MODE" "0"
+        ok "Container mode: disabled (forward chain drops all traffic)."
+        return 0
+    fi
+
+    # Ensure the [containers] section exists (older configs may lack it)
+    if ! grep -q '^\[containers\]' "$conf"; then
+        printf '\n[containers]\nCONTAINER_MODE = 0\nCONTAINER_POLICY = open\n' >> "$conf"
+    fi
+    set_conf_value "CONTAINER_MODE" "1"
+    ok "Container mode: enabled (CONTAINER_MODE = 1)."
+
+    # Published port policy
+    local policy="open"
+    if [[ -t 0 ]]; then
+        local answer=""
+        echo ""
+        info "CONTAINER_POLICY controls who can reach published container ports:"
+        info "  open     — any source (Docker's default behavior)"
+        info "  filtered — only IPs in the fwsec allow list"
+        read -r -p "$(echo -e "  ${BOLD}Restrict published container ports to the allow list?${NC} [y/N]: ")" answer || answer=""
+        if [[ "${answer,,}" == "y" || "${answer,,}" == "yes" ]]; then
+            policy="filtered"
+        fi
+    fi
+    set_conf_value "CONTAINER_POLICY" "$policy"
+    ok "Published container port policy: ${policy}."
+
+    # Exempt container networks from automatic bans (internal traffic must
+    # never be banned — a busy internal proxy is a classic false positive)
+    local subnets
+    subnets=$(_container_subnets)
+    if [[ -n "$subnets" ]]; then
+        local s added=0
+        touch "${CONFIG_DIR}/fwsec.ignore"
+        while read -r s; do
+            [[ -n "$s" ]] || continue
+            if ! grep -qF "$s" "${CONFIG_DIR}/fwsec.ignore"; then
+                echo "${s}  # container network (auto-added by installer)" >> "${CONFIG_DIR}/fwsec.ignore"
+                added=$((added + 1))
+            fi
+        done <<< "$subnets"
+        if [[ "$added" -gt 0 ]]; then
+            ok "Added ${added} container network(s) to fwsec.ignore (exempt from bans)."
+        fi
+    fi
+
+    print_container_recommendations
+}
+
+# =============================================================================
+# CrowdSec container log acquisition
+# =============================================================================
+configure_crowdsec_container_logs() {
+    [[ -n "${CONTAINER_RUNTIMES:-}" ]] || return 0
+    command -v cscli &>/dev/null || return 0
+    [[ -d /etc/crowdsec ]] || return 0
+
+    local acquis="/etc/crowdsec/acquis.d/fwsec-docker.yaml"
+    if [[ -f "$acquis" ]]; then
+        ok "CrowdSec container log acquisition already configured."
+        return 0
+    fi
+
+    local enable=0
+    if [[ -t 0 ]]; then
+        local answer=""
+        echo ""
+        read -r -p "$(echo -e "${CYAN}[*]${NC} Enable CrowdSec log analysis for containers (bans attacks against containerized apps)? [Y/n]: ")" answer || answer=""
+        if [[ -z "$answer" || "${answer,,}" == "y" || "${answer,,}" == "yes" ]]; then
+            enable=1
+        fi
+    else
+        enable=1
+    fi
+    [[ "$enable" -eq 1 ]] || return 0
+
+    mkdir -p /etc/crowdsec/acquis.d
+    cat > "$acquis" << 'ACQEOF'
+# Managed by fwsec installer — CrowdSec reads logs from all containers.
+# Log format is resolved from container labels (use_container_labels), see:
+# https://docs.crowdsec.net/docs/data_sources/docker
+source: docker
+container_name_regexp:
+  - ".*"
+use_container_labels: true
+ACQEOF
+    systemctl restart crowdsec 2>/dev/null || true
+    ok "CrowdSec container log acquisition enabled (${acquis})."
+    info "Label your containers (e.g. crowdsec.labels.type=nginx) so CrowdSec"
+    info "parses their logs with the right scenario collection."
+}
+
 configure_ports_if_needed() {
     if [[ "${CONF_IS_NEW:-0}" -eq 1 ]]; then
         configure_ports
@@ -751,6 +937,8 @@ main() {
     install_fwsec_package
     install_config_files
     configure_ports_if_needed
+    configure_containers
+    configure_crowdsec_container_logs
     install_binary
     install_service
 

@@ -18,7 +18,7 @@ from pathlib import Path
 
 from fwsec import __version__
 from fwsec import config as cfg
-from fwsec import crowdsec, nft, rules, state
+from fwsec import containers, crowdsec, nft, rules, state
 
 # ---------------------------------------------------------------------------
 # Output helpers
@@ -132,12 +132,45 @@ def cmd_start(_args: argparse.Namespace) -> None:
     _ok(f"Allow list: {len(allow_entries)} IPs, Deny list: {len(deny_entries)} IPs, "
         f"Temp blocks: {len(temp)} IPs.")
 
+    # Container support
+    runtimes = containers.detect_runtimes()
+    if runtimes and not c.container_mode:
+        _warn(f"Container runtime detected ({', '.join(runtimes)}) but CONTAINER_MODE = 0.")
+        _warn("The forward chain drops everything — container networking will break.")
+        _warn(f"Set CONTAINER_MODE = 1 in {cfg.CONF_FILE} and run: fwsec -r")
+    elif c.container_mode:
+        _ok(f"Container mode enabled (policy: {c.container_policy}).")
+        if c.container_policy == "filtered":
+            _apply_container_filter()
+
     # Mark enabled
     cfg.set_enabled(True)
 
     # Persist ruleset
     _persist_nftables()
     _ok("fwsec started.")
+
+
+def _apply_container_filter() -> None:
+    """Build the `containers` chain restricting published ports to the allow list."""
+    published = containers.externally_published_ports()
+    tcp_ports = [p.host_port for p in published if p.proto == "tcp"]
+    udp_ports = [p.host_port for p in published if p.proto == "udp"]
+    subnets = containers.container_networks()
+
+    if not tcp_ports and not udp_ports:
+        _info("No externally published container ports to filter.")
+        return
+
+    script = rules.generate_container_filter(tcp_ports, udp_ports, subnets)
+    try:
+        nft._run_script(script)
+        plist = ", ".join(
+            f"{p.host_port}/{p.proto} ({p.container})" for p in published
+        )
+        _ok(f"Published container ports restricted to the allow list: {plist}")
+    except RuntimeError as e:
+        _warn(f"Could not apply the container port filter: {e}")
 
 
 def cmd_stop(_args: argparse.Namespace) -> None:
@@ -234,6 +267,26 @@ def cmd_check(_args: argparse.Namespace) -> None:
     else:
         _warn("CrowdSec: not available (cscli not found)")
 
+    # Containers
+    runtimes = containers.detect_runtimes()
+    if runtimes:
+        _ok(f"Container runtime(s): {', '.join(runtimes)}")
+        if not c.container_mode:
+            _warn("CONTAINER_MODE = 0 — container networking is blocked by the "
+                  "forward chain. Set CONTAINER_MODE = 1 and run: fwsec -r")
+            issues += 1
+        else:
+            _ok(f"Container mode: enabled (policy: {c.container_policy})")
+        published = containers.externally_published_ports()
+        if published:
+            plist = ", ".join(f"{p.host_port}/{p.proto}→{p.container}" for p in published)
+            _ok(f"Published container ports: {plist}")
+            if c.container_policy != "filtered":
+                _info("CONTAINER_POLICY = open — published ports accept any source. "
+                      "Use 'filtered' to restrict them to the allow list.")
+    elif c.container_mode:
+        _info("CONTAINER_MODE = 1 but no running container runtime was found.")
+
     # SSH port
     ssh_port = _detect_ssh_port()
     _ok(f"SSH port detected: {ssh_port}")
@@ -274,6 +327,14 @@ def cmd_list(_args: argparse.Namespace) -> None:
         print(f"  {RED}{d.ip}{RESET}  [{d.duration}]  {d.reason}")
     if len(c_deny) > 20:
         print(f"  ... and {len(c_deny) - 20} more")
+
+    published = containers.published_ports()
+    if published:
+        print(f"\n{BOLD}Published container ports{RESET} — {len(published)} mappings")
+        for p in published:
+            local = "  (local only)" if p.host_ip in ("127.0.0.1", "::1", "[::1]") else ""
+            print(f"  {CYAN}{p.host_port}/{p.proto}{RESET} → "
+                  f"{p.container}:{p.container_port} [{p.runtime}]{local}")
 
     print()
 
@@ -475,6 +536,11 @@ def cmd_grep(args: argparse.Namespace) -> None:
                 _warn(f"  CrowdSec decision: {d.type}  reason={d.reason}  duration={d.duration}")
                 found = True
 
+        # Containers
+        for match in containers.find_ip(ip):
+            _info(f"  {match}")
+            found = True
+
         if not found:
             _info(f"  {ip} not found in any fwsec or CrowdSec list.")
 
@@ -509,10 +575,17 @@ def _fmt_duration(sec: int) -> str:
 
 
 def _persist_nftables() -> None:
-    """Save current ruleset to /etc/nftables.conf for persistence across reboots."""
-    rc, out, _ = nft._run("list", "ruleset")
-    if rc == 0:
-        Path("/etc/nftables.conf").write_text(out)
+    """Save fwsec's tables to /etc/nftables.conf for persistence across reboots.
+
+    Only the tables fwsec owns are saved — persisting the full ruleset would
+    freeze dynamic rules from other owners (Docker, Podman, libvirt) and
+    restore stale copies of them at boot.
+    """
+    out = nft.list_fwsec_tables()
+    if out:
+        Path("/etc/nftables.conf").write_text(
+            "#!/usr/sbin/nft -f\nflush ruleset\n\n" + out
+        )
 
 
 # ---------------------------------------------------------------------------

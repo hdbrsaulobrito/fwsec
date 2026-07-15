@@ -139,6 +139,10 @@ UDP_OUT    = 53,123      # Allowed outbound UDP ports
 ICMP_IN    = 1           # Allow inbound ping
 IPV6       = 1           # Enable IPv6 support
 
+[containers]
+CONTAINER_MODE   = 0     # 1 = host runs containers (Docker/Podman/nerdctl)
+CONTAINER_POLICY = open  # open | filtered (restrict published ports to the allow list)
+
 [crowdsec]
 ENABLED    = 1           # Enable CrowdSec integration
 SYNC_DENY  = 1           # Synchronize fwsec -d bans with CrowdSec decisions
@@ -176,6 +180,29 @@ Inbound packet
 - **`@allow4` / `@allow6`** — sets managed by `fwsec -a`
 - **`@deny4` / `@deny6`** — sets managed by `fwsec -d` and `fwsec -td`, with native timeouts
 - **`@crowdsec-blacklists`** — sets managed automatically by the CrowdSec bouncer
+
+The same allow/deny sets are also enforced on the **forward hook** (`whitelist_forward` at priority -100 and `blacklist_forward` at -50), so bans and allow rules cover traffic that is NATed to containers and never traverses the input hook.
+
+## Container hosts (Docker / Podman / nerdctl)
+
+Ports published by a container (`-p 80:80`) are DNATed before the input hook, so a conventional host firewall never sees that traffic — this is the classic "Docker bypasses the firewall" problem. fwsec addresses it natively:
+
+- **Bans always reach containers.** The `fwsec -d` / `fwsec -td` deny sets and CrowdSec decisions are enforced on the forward hook as well, so a banned IP cannot reach a published container port.
+- **`CONTAINER_MODE = 1`** keeps the main forward chain permissive (container networking keeps working) while still dropping CrowdSec-banned sources on forwarded traffic. With `CONTAINER_MODE = 0` the forward chain drops everything, which is correct for hosts without containers.
+- **`CONTAINER_POLICY = filtered`** additionally restricts every externally published container port to the fwsec allow list: `fwsec -s` discovers the published ports at start time and builds a `containers` chain (priority -60) that drops new connections to them from any source not in `@allow4`/`@allow6`. Matching uses the original (pre-NAT) destination port via conntrack. `open` (the default) keeps Docker's normal behavior.
+- **Container-aware commands.** `fwsec -l` lists port mappings of running containers (flagging localhost-only bindings), `fwsec -g IP` reports whether an IP belongs to a container or a container network, and `fwsec -c` warns when a runtime is detected but `CONTAINER_MODE` is off, and when published ports are unrestricted.
+- **Safe persistence.** fwsec persists only its own tables to `/etc/nftables.conf`, never the full ruleset — persisting everything would freeze the dynamic rules Docker/Podman manage and restore stale copies of them at boot.
+
+### Installer behavior on container hosts
+
+During installation, fwsec detects Docker, Podman, and nerdctl. When a runtime is found (or when you answer that you plan to run containers later), the installer:
+
+1. Enables `CONTAINER_MODE = 1` so the firewall never breaks container networking.
+2. Lists the ports currently published by running containers.
+3. Asks whether published ports should be restricted to the allow list (`CONTAINER_POLICY = filtered`).
+4. Adds the detected container network subnets to `fwsec.ignore`, so internal container traffic is never banned (a busy internal proxy is a classic false positive).
+5. Offers to enable CrowdSec log acquisition for containers (`/etc/crowdsec/acquis.d/fwsec-docker.yaml`, using `use_container_labels: true`), so attacks against containerized applications also generate bans. Label your containers (e.g. `crowdsec.labels.type=nginx`) so CrowdSec parses their logs with the right collection.
+6. Prints default security recommendations: bind internal-only services to localhost (`-p 127.0.0.1:5432:5432`), never expose the engine socket (`docker.sock`), prefer rootless mode, and keep images from trusted registries.
 
 ## CrowdSec integration
 
