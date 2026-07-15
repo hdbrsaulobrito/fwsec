@@ -112,7 +112,8 @@ install_base_deps() {
     case "$OS_FAMILY" in
         debian)
             export DEBIAN_FRONTEND=noninteractive
-            apt-get update -qq
+            # A broken unrelated third-party repo must not abort the install
+            apt-get update -qq 2>/dev/null || warn "apt-get update reported errors from an unrelated repository; continuing."
             apt-get install -y -qq \
                 curl tar gzip ca-certificates gnupg \
                 nftables \
@@ -673,7 +674,8 @@ configure_ports() {
     [[ -f "$conf" ]] || return 0
 
     local ssh_port
-    ssh_port=$(grep -E "^Port\s+" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -1)
+    # `|| true`: sshd_config without an explicit Port line must not abort (set -e + pipefail)
+    ssh_port=$(grep -E "^Port\s+" /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}' | head -1 || true)
     ssh_port="${ssh_port:-22}"
 
     echo ""
@@ -910,12 +912,11 @@ configure_crowdsec_container_logs() {
 
     mkdir -p /etc/crowdsec/acquis.d
     cat > "$acquis" << 'ACQEOF'
-# Managed by fwsec installer — CrowdSec reads logs from all containers.
-# Log format is resolved from container labels (use_container_labels), see:
+# Managed by fwsec installer — CrowdSec reads logs from labeled containers.
+# The log type comes from container labels (e.g. crowdsec.labels.type=nginx);
+# use_container_labels is mutually exclusive with container_name filters. See:
 # https://docs.crowdsec.net/docs/data_sources/docker
 source: docker
-container_name_regexp:
-  - ".*"
 use_container_labels: true
 ACQEOF
     systemctl restart crowdsec 2>/dev/null || true
