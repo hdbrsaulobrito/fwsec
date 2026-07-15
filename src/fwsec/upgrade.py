@@ -60,6 +60,24 @@ def is_newer(remote: str, local: str) -> bool:
     return _version_tuple(remote) > _version_tuple(local)
 
 
+def _extract_safely(tar: tarfile.TarFile, destination: Path) -> None:
+    """Extract a source archive without allowing writes outside destination."""
+    if hasattr(tarfile, "data_filter"):
+        tar.extractall(destination, filter="data")
+        return
+
+    # Python 3.10/3.11 do not provide extraction filters. Validate every
+    # member and reject links and device files before using extractall().
+    root = destination.resolve()
+    for member in tar.getmembers():
+        target = (destination / member.name).resolve()
+        if target != root and root not in target.parents:
+            raise tarfile.TarError(f"archive member escapes destination: {member.name}")
+        if member.issym() or member.islnk() or member.isdev():
+            raise tarfile.TarError(f"unsafe archive member: {member.name}")
+    tar.extractall(destination)
+
+
 def download_source(version: str) -> Optional[Path]:
     """Download and extract the source tarball; returns the source directory."""
     data = _get(f"https://github.com/{REPO}/archive/refs/tags/v{version}.tar.gz")
@@ -74,10 +92,7 @@ def download_source(version: str) -> Optional[Path]:
     tarball.write_bytes(data)
     try:
         with tarfile.open(tarball) as tar:
-            try:
-                tar.extractall(tmp, filter="data")
-            except TypeError:  # Python < 3.12 has no extract filters
-                tar.extractall(tmp)
+            _extract_safely(tar, tmp)
     except tarfile.TarError:
         return None
 
