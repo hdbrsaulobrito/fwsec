@@ -13,7 +13,14 @@ from typing import Optional
 
 
 def _cscli(*args: str) -> tuple[int, str, str]:
-    r = subprocess.run(["cscli", *args], capture_output=True, text=True)
+    # Timeout guards against a hung LAPI (e.g. crowdsec down): fwsec commands
+    # must degrade gracefully instead of blocking forever.
+    try:
+        r = subprocess.run(
+            ["cscli", *args], capture_output=True, text=True, timeout=15
+        )
+    except (OSError, subprocess.SubprocessError):
+        return 1, "", "cscli unavailable or timed out"
     return r.returncode, r.stdout, r.stderr
 
 
@@ -51,16 +58,21 @@ def list_decisions(ip: Optional[str] = None) -> list[Decision]:
     if not raw:
         return []
     result = []
-    for d in raw:
-        result.append(Decision(
-            id=d.get("id", 0),
-            ip=d.get("value", ""),
-            reason=d.get("reason", ""),
-            duration=d.get("duration", ""),
-            origin=d.get("origin", ""),
-            type=d.get("type", "ban"),
-            scope=d.get("scope", "Ip"),
-        ))
+    for item in raw:
+        # `cscli decisions list -o json` returns a list of ALERTS, each with a
+        # nested `decisions` array; flatten it. Keep supporting plain decision
+        # objects in case a future cscli returns them directly.
+        nested = item.get("decisions")
+        for d in nested if nested is not None else [item]:
+            result.append(Decision(
+                id=d.get("id", 0),
+                ip=d.get("value", ""),
+                reason=d.get("scenario") or item.get("scenario") or d.get("reason", ""),
+                duration=d.get("duration", ""),
+                origin=d.get("origin", ""),
+                type=d.get("type", "ban"),
+                scope=d.get("scope", "Ip"),
+            ))
     return result
 
 

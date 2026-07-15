@@ -94,12 +94,12 @@ table {NFT_FAMILY} {NFT_TABLE} {{
 
     set {SET_DENY4} {{
         type ipv4_addr
-        flags timeout
+        flags interval, timeout
     }}
 
     set {SET_DENY6} {{
         type ipv6_addr
-        flags timeout
+        flags interval, timeout
     }}
 
     chain whitelist {{

@@ -200,13 +200,34 @@ def is_ignored(ip: str) -> bool:
 
 
 def set_enabled(value: bool) -> None:
-    """Toggle ENABLED flag in fwsec.conf."""
-    parser = configparser.ConfigParser()
-    for section, values in DEFAULTS.items():
-        parser[section] = values
-    if CONF_FILE.exists():
-        parser.read(CONF_FILE)
-    parser["firewall"]["ENABLED"] = "1" if value else "0"
+    """Toggle the ENABLED flag in the [firewall] section of fwsec.conf.
+
+    Edits only that line: rewriting the file through configparser would
+    lowercase every key and destroy the documented template's comments.
+    """
+    flag = "1" if value else "0"
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    with open(CONF_FILE, "w") as f:
-        parser.write(f)
+
+    if not CONF_FILE.exists():
+        CONF_FILE.write_text(f"[firewall]\nENABLED = {flag}\n")
+        return
+
+    lines = CONF_FILE.read_text().splitlines()
+    in_firewall = False
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+        if stripped.startswith("["):
+            in_firewall = stripped.lower() == "[firewall]"
+        elif in_firewall and re.match(r"(?i)^ENABLED\s*=", stripped):
+            lines[i] = f"ENABLED = {flag}"
+            break
+    else:
+        # No ENABLED line found — add one (inside [firewall] if it exists)
+        for i, line in enumerate(lines):
+            if line.strip().lower() == "[firewall]":
+                lines.insert(i + 1, f"ENABLED = {flag}")
+                break
+        else:
+            lines = [f"[firewall]", f"ENABLED = {flag}", ""] + lines
+
+    CONF_FILE.write_text("\n".join(lines) + "\n")
