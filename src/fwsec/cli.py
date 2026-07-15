@@ -301,6 +301,21 @@ def cmd_check(_args: argparse.Namespace) -> None:
 def cmd_list(_args: argparse.Namespace) -> None:
     _header("fwsec — loaded rules")
 
+    # Allowed ports (from fwsec.conf; SSH is detected and always open)
+    c = cfg.load_config()
+    ssh_port = _detect_ssh_port()
+
+    def _ports(plist: list[str]) -> str:
+        return ", ".join(plist) if plist else "(none)"
+
+    print(f"\n{BOLD}Allowed ports{RESET}")
+    print(f"  {CYAN}TCP IN {RESET} : {ssh_port} (SSH)"
+          f"{', ' + _ports(c.tcp_in) if c.tcp_in else ''}")
+    print(f"  {CYAN}TCP OUT{RESET} : {_ports(c.tcp_out)}")
+    print(f"  {CYAN}UDP IN {RESET} : {_ports(c.udp_in)}")
+    print(f"  {CYAN}UDP OUT{RESET} : {_ports(c.udp_out)}")
+    print(f"  {CYAN}ICMP IN{RESET} : {'yes' if c.icmp_in else 'no'}")
+
     if not nft.table_exists():
         _warn("fwsec table not loaded. Run: fwsec -s")
         return
