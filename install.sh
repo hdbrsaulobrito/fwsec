@@ -12,7 +12,8 @@ INSTALL_DIR="/opt/fwsec"
 CONFIG_DIR="/etc/fwsec"
 BIN="/usr/local/bin/fwsec"
 SERVICE="/etc/systemd/system/fwsec.service"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# BASH_SOURCE is unset when the script is piped (curl | bash) — fall back to $0
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)"
 
 # Colors
 RED='\033[91m'; GREEN='\033[92m'; YELLOW='\033[93m'; CYAN='\033[96m'
@@ -561,6 +562,26 @@ download_source() {
     echo "$dir"
 }
 
+bootstrap_source() {
+    # When install.sh runs standalone (curl | bash) the source tree is not
+    # next to it — download the latest release so the install can proceed.
+    if [[ -f "${SCRIPT_DIR}/pyproject.toml" ]]; then
+        return 0
+    fi
+
+    info "Standalone mode: downloading the fwsec source (no git required)..."
+    command -v curl &>/dev/null || die "curl is required for the standalone install."
+    command -v tar  &>/dev/null || die "tar is required for the standalone install."
+
+    local ver src_dir
+    ver=$(fetch_remote_version)
+    src_dir=$(download_source "${ver:-main}") || die "Could not download the fwsec source from ${REPO}."
+    SCRIPT_DIR="$src_dir"
+    FWSEC_VERSION=$(grep -E '^version[[:space:]]*=' "${SCRIPT_DIR}/pyproject.toml" \
+                    | head -1 | sed -E 's/.*"([^"]+)".*/\1/')
+    ok "fwsec ${FWSEC_VERSION} source ready at ${SCRIPT_DIR}."
+}
+
 run_upgrade() {
     command -v curl &>/dev/null || die "curl is required for --upgrade."
 
@@ -931,6 +952,9 @@ main() {
             --upgrade) UPGRADE=1 ;;
         esac
     done
+
+    # Standalone execution (curl | bash): fetch the source tree first
+    bootstrap_source
 
     echo ""
     echo -e "${BOLD}${CYAN}============================================${NC}"
