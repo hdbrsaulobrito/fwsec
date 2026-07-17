@@ -228,6 +228,24 @@ Ports published by a container (`-p 80:80`) are DNATed before the input hook, so
 - **Container-aware commands.** `fwsec -l` lists port mappings of running containers (flagging localhost-only bindings), `fwsec -g IP` reports whether an IP belongs to a container or a container network, and `fwsec -c` warns when a runtime is detected but `CONTAINER_MODE` is off, and when published ports are unrestricted.
 - **Safe persistence.** fwsec persists only its own tables to `/etc/nftables.conf`, never the full ruleset — persisting everything would freeze the dynamic rules Docker/Podman manage and restore stale copies of them at boot.
 
+## Virtualization hosts (KVM / libvirt · Proxmox VE · Xen)
+
+VM traffic reaches the firewall in two very different ways, and fwsec handles both:
+
+- **NAT/routed VMs** (libvirt's default `virbr0` network) always traverse the forward hook. With `HYPERVISOR_MODE = 1`, the forward chain stays permissive so VM networking works, while fwsec/CrowdSec bans still drop banned sources on forwarded traffic. With `HYPERVISOR_MODE = 0` (hosts without VMs) the forward chain drops everything.
+- **Bridged VMs** (`vmbr0` on Proxmox, `br0` with KVM) are layer 2: their traffic only traverses the L3 firewall when the `br_netfilter` module is active (`bridge-nf-call-iptables=1`). fwsec reports this state instead of letting it change silently: with br_netfilter inactive, bridged VMs work but **bans do not protect them**; when it becomes active (installing Docker loads it, for example), bridged traffic starts hitting the forward chain — which is exactly why `HYPERVISOR_MODE = 1` matters on such hosts.
+- **`VM_POLICY = filtered`** restricts new connections into libvirt NAT/routed VM subnets to the fwsec allow list (a `vms` chain at priority -55, built at `fwsec -s` from `virsh net-dumpxml`). Bridged VM subnets cannot be enumerated reliably and are not covered by this policy.
+- **`fwsec -c`** shows detected hypervisors, VM bridges, the br_netfilter state with its security implication, libvirt VM networks, and warns when **pve-firewall** (Proxmox) is active alongside fwsec — two firewalls must not manage the same host.
+
+### Installer behavior on virtualization hosts
+
+The installer detects Proxmox VE (`/etc/pve`, `pveversion`), libvirt/KVM (`virsh`), and Xen (`xl` + `/proc/xen`), plus active VM bridges. When found, it:
+
+1. Enables `HYPERVISOR_MODE = 1` so the firewall never breaks VM networking.
+2. Reports whether `br_netfilter` is active and what that means for bridged VMs (including how to enable filtering: `modprobe br_netfilter` + `sysctl net.bridge.bridge-nf-call-iptables=1`).
+3. Asks whether libvirt VM networks should be restricted to the allow list (`VM_POLICY = filtered`).
+4. On Proxmox with pve-firewall active, asks which firewall should manage the host, and can stop/disable pve-firewall.
+
 ### Installer behavior on container hosts
 
 During installation, fwsec detects Docker, Podman, and nerdctl. When a runtime is found (or when you answer that you plan to run containers later), the installer:

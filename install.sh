@@ -6,7 +6,7 @@
 # =============================================================================
 set -euo pipefail
 
-FWSEC_VERSION="1.1.0"
+FWSEC_VERSION="1.2.0"
 REPO="hdbrsaulobrito/fwsec"
 INSTALL_DIR="/opt/fwsec"
 CONFIG_DIR="/etc/fwsec"
@@ -962,6 +962,107 @@ configure_containers() {
 }
 
 # =============================================================================
+# Hypervisor support (KVM/libvirt, Proxmox VE, Xen)
+# =============================================================================
+detect_hypervisor() {
+    HYPERVISORS=""
+    if [[ -d /etc/pve ]] || command -v pveversion &>/dev/null; then
+        HYPERVISORS="proxmox"
+    fi
+    if command -v virsh &>/dev/null; then
+        HYPERVISORS="${HYPERVISORS:+${HYPERVISORS} }libvirt"
+    fi
+    if command -v xl &>/dev/null && [[ -d /proc/xen ]]; then
+        HYPERVISORS="${HYPERVISORS:+${HYPERVISORS} }xen"
+    fi
+}
+
+_vm_bridges() {
+    # Bridges not owned by container runtimes (docker0, podman*, cni*, br-*)
+    ip -o link show type bridge 2>/dev/null | \
+        sed -E 's/^[0-9]+:\s*([^:@]+).*/\1/' | \
+        grep -vE '^(docker|podman|cni|br-)' || true
+}
+
+configure_hypervisor() {
+    local conf="${CONFIG_DIR}/fwsec.conf"
+    [[ -f "$conf" ]] || return 0
+
+    detect_hypervisor
+    local vm_brs
+    vm_brs=$(_vm_bridges | tr "\n" " ")
+
+    # Nothing hypervisor-related on this host
+    if [[ -z "$HYPERVISORS" && -z "${vm_brs// /}" ]]; then
+        return 0
+    fi
+
+    echo ""
+    echo -e "${BOLD}${CYAN}--------------------------------------------${NC}"
+    echo -e "${BOLD}${CYAN}  Hypervisor support${NC}"
+    echo -e "${BOLD}${CYAN}--------------------------------------------${NC}"
+    echo ""
+    [[ -n "$HYPERVISORS" ]] && ok "Hypervisor detected: ${BOLD}${HYPERVISORS}${NC}"
+    [[ -n "${vm_brs// /}" ]] && ok "VM bridge(s): ${vm_brs}"
+
+    # Ensure the [hypervisor] section exists (older configs may lack it)
+    if ! grep -q '^\[hypervisor\]' "$conf"; then
+        printf '\n[hypervisor]\nHYPERVISOR_MODE = 0\nVM_POLICY = open\n' >> "$conf"
+    fi
+    set_conf_value "HYPERVISOR_MODE" "1"
+    ok "Hypervisor mode: enabled (HYPERVISOR_MODE = 1) — VM networking is preserved;"
+    ok "fwsec/CrowdSec bans still apply to routed VM traffic."
+
+    # br_netfilter transparency
+    if [[ -n "${vm_brs// /}" ]]; then
+        if [[ "$(cat /proc/sys/net/bridge/bridge-nf-call-iptables 2>/dev/null)" == "1" ]]; then
+            info "br_netfilter is ACTIVE: bridged VM traffic traverses the firewall."
+        else
+            warn "br_netfilter is inactive: bridged VM traffic BYPASSES the firewall."
+            warn "Bridged VMs keep working but fwsec/CrowdSec bans do not protect them."
+            warn "To filter bridged VMs: modprobe br_netfilter && sysctl net.bridge.bridge-nf-call-iptables=1"
+        fi
+    fi
+
+    # VM policy for libvirt NAT/routed networks
+    local policy="open"
+    if command -v virsh &>/dev/null && [[ -t 0 ]]; then
+        local answer=""
+        echo ""
+        info "VM_POLICY controls who can reach libvirt NAT/routed VM networks:"
+        info "  open     — any source (default)"
+        info "  filtered — only IPs in the fwsec allow list"
+        read -r -p "$(echo -e "  ${BOLD}Restrict VM networks to the allow list?${NC} [y/N]: ")" answer || answer=""
+        if [[ "${answer,,}" == "y" || "${answer,,}" == "yes" ]]; then
+            policy="filtered"
+        fi
+    fi
+    set_conf_value "VM_POLICY" "$policy"
+    ok "VM network policy: ${policy}."
+
+    # Proxmox: two firewalls must not manage the same host
+    if systemctl is-active --quiet pve-firewall 2>/dev/null; then
+        echo ""
+        warn "pve-firewall is ACTIVE. Running two firewalls on the same host causes"
+        warn "conflicting rules. Choose one manager."
+        if [[ -t 0 ]]; then
+            local answer=""
+            read -r -p "$(echo -e "  ${BOLD}Disable pve-firewall and let fwsec manage the firewall?${NC} [y/N]: ")" answer || answer=""
+            if [[ "${answer,,}" == "y" || "${answer,,}" == "yes" ]]; then
+                systemctl stop pve-firewall 2>/dev/null || true
+                systemctl disable pve-firewall 2>/dev/null || true
+                ok "pve-firewall stopped and disabled; fwsec manages the firewall."
+            else
+                warn "Keeping pve-firewall active — review the rule interaction carefully."
+            fi
+        else
+            warn "Non-interactive shell: pve-firewall left untouched. Disable it manually"
+            warn "if fwsec should manage this host: systemctl disable --now pve-firewall"
+        fi
+    fi
+}
+
+# =============================================================================
 # CrowdSec container log acquisition
 # =============================================================================
 configure_crowdsec_container_logs() {
@@ -1071,6 +1172,7 @@ main() {
     install_config_files
     configure_ports_if_needed
     configure_containers
+    configure_hypervisor
     configure_crowdsec_container_logs
     install_binary
     install_service

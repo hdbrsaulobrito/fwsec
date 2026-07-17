@@ -18,7 +18,7 @@ from pathlib import Path
 
 from fwsec import __version__
 from fwsec import config as cfg
-from fwsec import containers, crowdsec, nft, rules, state, upgrade
+from fwsec import containers, crowdsec, hypervisor, nft, rules, state, upgrade
 
 # ---------------------------------------------------------------------------
 # Output helpers
@@ -143,6 +143,18 @@ def cmd_start(_args: argparse.Namespace) -> None:
         if c.container_policy == "filtered":
             _apply_container_filter()
 
+    # Hypervisor support
+    hvs = hypervisor.detect_hypervisors()
+    if hvs and not c.hypervisor_mode:
+        _warn(f"Hypervisor detected ({', '.join(hvs)}) but HYPERVISOR_MODE = 0.")
+        _warn("The forward chain drops routed traffic — NAT/routed VM networking "
+              "(and bridged VMs with br_netfilter) will break.")
+        _warn(f"Set HYPERVISOR_MODE = 1 in {cfg.CONF_FILE} and run: fwsec -r")
+    elif c.hypervisor_mode:
+        _ok(f"Hypervisor mode enabled (VM policy: {c.vm_policy}).")
+        if c.vm_policy == "filtered":
+            _apply_vm_filter()
+
     # Mark enabled
     cfg.set_enabled(True)
 
@@ -171,6 +183,21 @@ def _apply_container_filter() -> None:
         _ok(f"Published container ports restricted to the allow list: {plist}")
     except RuntimeError as e:
         _warn(f"Could not apply the container port filter: {e}")
+
+
+def _apply_vm_filter() -> None:
+    """Build the `vms` chain restricting VM subnets to the allow list."""
+    subnets = hypervisor.vm_networks()
+    if not subnets:
+        _info("No libvirt VM networks found to filter (bridged VMs are "
+              "outside L3 hooks unless br_netfilter is active).")
+        return
+    script = rules.generate_vm_filter(subnets)
+    try:
+        nft._run_script(script)
+        _ok(f"VM networks restricted to the allow list: {', '.join(subnets)}")
+    except RuntimeError as e:
+        _warn(f"Could not apply the VM network filter: {e}")
 
 
 def cmd_stop(_args: argparse.Namespace) -> None:
@@ -286,6 +313,41 @@ def cmd_check(_args: argparse.Namespace) -> None:
                       "Use 'filtered' to restrict them to the allow list.")
     elif c.container_mode:
         _info("CONTAINER_MODE = 1 but no running container runtime was found.")
+
+    # Hypervisor / bridges
+    hvs = hypervisor.detect_hypervisors()
+    vm_brs = hypervisor.vm_bridges()
+    if hvs or vm_brs:
+        if hvs:
+            _ok(f"Hypervisor(s): {', '.join(hvs)}")
+        if vm_brs:
+            _ok(f"VM bridge(s): {', '.join(vm_brs)}")
+        if not c.hypervisor_mode:
+            _warn("HYPERVISOR_MODE = 0 — NAT/routed VM networking is blocked by "
+                  "the forward chain. Set HYPERVISOR_MODE = 1 and run: fwsec -r")
+            issues += 1
+        else:
+            _ok(f"Hypervisor mode: enabled (VM policy: {c.vm_policy})")
+        if vm_brs:
+            if hypervisor.br_netfilter_active():
+                _ok("br_netfilter: ACTIVE — bridged VM traffic traverses the "
+                    "firewall (bans and rules apply to bridged VMs).")
+            else:
+                _info("br_netfilter: inactive — bridged VM traffic bypasses the "
+                      "L3 firewall entirely: VMs work, but fwsec/CrowdSec bans "
+                      "do NOT protect them. Load br_netfilter (and enable "
+                      "HYPERVISOR_MODE) to filter bridged VMs.")
+        nets = hypervisor.vm_networks()
+        if nets:
+            _ok(f"libvirt VM network(s): {', '.join(nets)}")
+            if c.vm_policy != "filtered":
+                _info("VM_POLICY = open — VM subnets accept any source. "
+                      "Use 'filtered' to restrict them to the allow list.")
+        if hypervisor.pve_firewall_active():
+            _warn("pve-firewall is ACTIVE — two firewalls are managing this "
+                  "host. Choose one: keep pve-firewall and skip fwsec, or "
+                  "disable it (the installer can do this).")
+            issues += 1
 
     # SSH port
     ssh_port = _detect_ssh_port()
