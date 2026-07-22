@@ -46,6 +46,10 @@ def generate_filter_table(cfg: FwsecConfig, ssh_port: int) -> str:
     chain forward {
         type filter hook forward priority filter; policy accept;
 
+        # Allow list: total bypass, ahead of the CrowdSec drop below
+        ip  saddr @allow4 accept
+        ip6 saddr @allow6 accept
+
         ct state established,related accept
 
         # CrowdSec bans also apply to forwarded (container) traffic
@@ -56,6 +60,10 @@ def generate_filter_table(cfg: FwsecConfig, ssh_port: int) -> str:
         forward_chain = """\
     chain forward {
         type filter hook forward priority filter; policy drop;
+
+        # Allow list: total bypass, ahead of the default DROP policy
+        ip  saddr @allow4 accept
+        ip6 saddr @allow6 accept
     }"""
 
     return f"""#!/usr/sbin/nft -f
@@ -67,6 +75,23 @@ add table inet filter
 flush table inet filter
 
 table inet filter {{
+
+    # Mirror of inet fwsec's allow4/allow6 (see nft.py:allow/unallow).
+    # nftables sets are table-scoped, so `ip saddr @allow4 accept` in this
+    # table's chains needs its own copy of the set to reference — the
+    # `inet fwsec` whitelist chain accepting a packet does not stop it from
+    # being evaluated by this table's chains at the same hook afterwards.
+    set allow4 {{
+        type ipv4_addr
+        flags interval
+        auto-merge
+    }}
+
+    set allow6 {{
+        type ipv6_addr
+        flags interval
+        auto-merge
+    }}
 
     # CrowdSec bouncer sets (managed by crowdsec-firewall-bouncer)
     set crowdsec-blacklists {{
@@ -81,6 +106,10 @@ table inet filter {{
 
     chain input {{
         type filter hook input priority filter; policy drop;
+
+        # Allow list: total bypass, ahead of CrowdSec and every other rule
+        ip  saddr @allow4 accept
+        ip6 saddr @allow6 accept
 
         # Loopback
         iif "lo" accept
