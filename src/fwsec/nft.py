@@ -19,6 +19,7 @@ from typing import Optional
 
 NFT_FAMILY = "inet"
 NFT_TABLE = "fwsec"
+NFT_FILTER_TABLE = "filter"
 
 SET_ALLOW4 = "allow4"
 SET_ALLOW6 = "allow6"
@@ -134,16 +135,18 @@ table {NFT_FAMILY} {NFT_TABLE} {{
 # Set element management
 # ---------------------------------------------------------------------------
 
-def add_element(set_name: str, ip: str, timeout_sec: Optional[int] = None) -> None:
+def add_element(
+    set_name: str, ip: str, timeout_sec: Optional[int] = None, table: str = NFT_TABLE
+) -> None:
     if timeout_sec is not None:
         element = f"{{ {ip} timeout {timeout_sec}s }}"
     else:
         element = f"{{ {ip} }}"
-    _run("add", "element", NFT_FAMILY, NFT_TABLE, set_name, element, check=True)
+    _run("add", "element", NFT_FAMILY, table, set_name, element, check=True)
 
 
-def delete_element(set_name: str, ip: str) -> bool:
-    rc, _, _ = _run("delete", "element", NFT_FAMILY, NFT_TABLE, set_name, f"{{ {ip} }}")
+def delete_element(set_name: str, ip: str, table: str = NFT_TABLE) -> bool:
+    rc, _, _ = _run("delete", "element", NFT_FAMILY, table, set_name, f"{{ {ip} }}")
     return rc == 0
 
 
@@ -175,13 +178,30 @@ def element_exists(set_name: str, ip: str) -> bool:
 # ---------------------------------------------------------------------------
 
 def allow(ip: str) -> None:
+    """Add ip to the allow set, mirrored into `inet filter` for a total bypass.
+
+    nftables sets are table-scoped, so the `inet filter/input` and `forward`
+    chains (SSH, port rules, CrowdSec drop, default DROP policy) cannot see
+    `inet fwsec`'s allow4/allow6 directly. A duplicate set lives in `inet
+    filter` too (see rules.py) with an accept rule ahead of everything else,
+    so an allow-listed IP is never touched by any later rule, including
+    CrowdSec bans. The mirror write is best-effort: if `inet filter` hasn't
+    been (re)created yet with the duplicate set, the canonical fwsec-table
+    entry still succeeds and the mirror catches up on the next `fwsec -s/-r`.
+    """
     set_name = _set_for(ip, "allow")
     add_element(set_name, ip)
+    try:
+        add_element(set_name, ip, table=NFT_FILTER_TABLE)
+    except RuntimeError:
+        pass
 
 
 def unallow(ip: str) -> bool:
     set_name = _set_for(ip, "allow")
-    return delete_element(set_name, ip)
+    ok = delete_element(set_name, ip)
+    delete_element(set_name, ip, table=NFT_FILTER_TABLE)
+    return ok
 
 
 def deny(ip: str, timeout_sec: Optional[int] = None) -> None:
